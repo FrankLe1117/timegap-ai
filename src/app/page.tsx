@@ -136,7 +136,7 @@ export default function Home() {
 
   const handleCalendarSelect = useCallback(
     (window: FreeWindow) => {
-      const input = `我今天${window.start_time}在陆家嘴结束会议，晚上22:00之后没有安排。帮我规划这段空闲时间。`;
+      const input = `今天是出差最后一天，我${window.start_time}在陆家嘴结束会议，晚上22:00从虹桥火车站坐高铁返程。帮我规划这段空档。`;
       setShowCalendar(false);
       handlePlan(input);
     },
@@ -160,18 +160,30 @@ export default function Home() {
             </div>
             <div>
               <span className="text-sm font-semibold text-slate-900">TimeGap AI</span>
-              <span className="ml-2 text-[11px] text-slate-400">演示版 · AI 理解 + 演示城市图</span>
+              <span className="ml-2 text-[11px] text-slate-400">出差/旅行最后一天 · AI 理解 + 演示城市图</span>
               {planData && (
-                <span className="ml-3 text-xs text-slate-400">
-                  到站信心{" "}
-                  <span className={`font-semibold ${
-                    Math.max(...planData.plans.map((p) => p.suitability_tags.station_arrival_confidence)) >= 85
-                      ? "text-emerald-600"
-                      : "text-amber-600"
-                  }`}>
-                    {Math.max(...planData.plans.map((p) => p.suitability_tags.station_arrival_confidence))}%
+                <>
+                  <span className="ml-3 text-xs text-slate-400">
+                    到站安全{" "}
+                    <span className={`font-semibold ${
+                      Math.max(...planData.plans.map((p) => p.suitability_tags.station_arrival_confidence)) >= 85
+                        ? "text-emerald-600"
+                        : "text-amber-600"
+                    }`}>
+                      {Math.max(...planData.plans.map((p) => p.suitability_tags.station_arrival_confidence))}
+                    </span>
                   </span>
-                </span>
+                  <span className="ml-2 text-xs text-slate-400">
+                    体验分{" "}
+                    <span className={`font-semibold ${
+                      Math.max(...planData.plans.map((p) => p.suitability_tags.experience_score)) >= 75
+                        ? "text-purple-600"
+                        : "text-blue-600"
+                    }`}>
+                      {Math.max(...planData.plans.map((p) => p.suitability_tags.experience_score))}
+                    </span>
+                  </span>
+                </>
               )}
             </div>
           </div>
@@ -179,15 +191,15 @@ export default function Home() {
             <div className="flex items-center gap-3 text-[11px] text-slate-400">
               <span className="flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                演示交通图
+                赶车安全边界已检查
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                到站安全已检查
+                晚高峰已纳入
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-                内置城市知识
+                演示城市图
               </span>
             </div>
           )}

@@ -82,14 +82,28 @@ export interface SuitabilityTags {
   luggage_friendly: "High" | "Medium" | "Low";
   weather_robustness: "High" | "Medium" | "Low";
   station_arrival_confidence: number;
+  experience_score: number;
+}
+
+export interface RouteHop {
+  from: string;
+  to: string;
+  travel_min: number;
+  mode?: string;
+  is_rush_hour?: boolean;
+  kind: "leg" | "stop";
+  stop_duration_min?: number;
+  activity_type?: TimelineItem["activity_type"];
 }
 
 export interface Plan {
   plan_name: string;
   plan_type: "balanced" | "low_risk" | "local_experience";
   one_sentence_summary: string;
+  tradeoff_summary: string;
   suitability_tags: SuitabilityTags;
   timeline: TimelineItem[];
+  route_chain: RouteHop[];
   latest_leave_for_station: string;
   risk_note: string;
   backup_suggestion: string;

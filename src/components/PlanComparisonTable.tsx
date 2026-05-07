@@ -1,13 +1,15 @@
 import { Plan } from "@/types";
 
-function MiniBar({ value }: { value: number }) {
-  const color = value >= 85 ? "bg-emerald-500" : value >= 65 ? "bg-amber-500" : "bg-red-500";
+function MiniBar({ value, kind }: { value: number; kind: "safety" | "experience" }) {
+  const safetyColor = value >= 85 ? "bg-emerald-500" : value >= 65 ? "bg-amber-500" : "bg-red-500";
+  const expColor = value >= 75 ? "bg-purple-500" : value >= 55 ? "bg-blue-500" : "bg-slate-400";
+  const color = kind === "safety" ? safetyColor : expColor;
   return (
     <div className="flex items-center gap-1.5">
       <div className="w-10 h-1.5 bg-slate-100 rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${value}%` }} />
       </div>
-      <span className="text-[11px] font-mono text-slate-600">{value}%</span>
+      <span className="text-[11px] font-mono text-slate-600">{value}</span>
     </div>
   );
 }
@@ -70,10 +72,18 @@ export default function PlanComparisonTable({ plans }: { plans: Plan[] }) {
               </tr>
             ))}
             <tr>
-              <td className="px-3 py-1.5 text-slate-500 font-medium">到站信心</td>
+              <td className="px-3 py-1.5 text-slate-500 font-medium">到站安全</td>
               {plans.map((p) => (
                 <td key={p.plan_type} className="px-3 py-1.5">
-                  <MiniBar value={p.suitability_tags.station_arrival_confidence} />
+                  <MiniBar value={p.suitability_tags.station_arrival_confidence} kind="safety" />
+                </td>
+              ))}
+            </tr>
+            <tr>
+              <td className="px-3 py-1.5 text-slate-500 font-medium">体验分</td>
+              {plans.map((p) => (
+                <td key={p.plan_type} className="px-3 py-1.5">
+                  <MiniBar value={p.suitability_tags.experience_score} kind="experience" />
                 </td>
               ))}
             </tr>

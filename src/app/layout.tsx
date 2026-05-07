@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TimeGap AI - 智能空档时间规划",
-  description: "一个懂时间约束、路线风险和用户偏好的城市空档规划 Agent",
+  title: "TimeGap AI · 出差/旅行最后一天行程规划助手",
+  description: "在赶车安全边界内，给你最后一天的最优体验：理解时间约束、晚高峰风险与本地偏好。",
 };
 
 export default function RootLayout({

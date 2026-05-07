@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import LastDayModePanel from "./LastDayModePanel";
 
 const EXAMPLE_PROMPTS = [
-  "我今天上午11:30在陆家嘴开完会，晚上22:00从虹桥站坐高铁离开。中间想逛逛，吃顿有本地特色但不太贵的饭。",
+  "我今天是出差最后一天，11:30在陆家嘴开完会，晚上22:00从虹桥站高铁返程。想吃本地菜再轻度逛一下。",
   "我下午2点在人民广场结束事情，晚上8点半要到虹桥站。带着行李，不想走太多路。",
-  "我今天下午1点从静安寺出发，晚上9点从虹桥站出发。今天下雨，想找室内的地方逛逛。",
-  "我中午12点在陆家嘴结束会议，晚上10点从虹桥站走。想体验更本地的上海。",
+  "今天是旅行最后一天，下午1点从静安寺出发，晚上9点虹桥站出发。今天下雨，找室内为主。",
+  "我中午12点在陆家嘴结束会议，晚上10点从虹桥站走。想体验更本地的上海，但绝对不能误车。",
 ];
 
 const QUICK_ACTIONS = [
@@ -78,7 +79,7 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
           </div>
           <div>
             <h1 className="text-base font-semibold text-slate-900">TimeGap AI</h1>
-            <p className="text-[11px] text-slate-400">智能规划你的行程间隙时间</p>
+            <p className="text-[11px] text-slate-400">出差/旅行最后一天行程规划助手</p>
           </div>
         </div>
       </div>
@@ -90,7 +91,8 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
             <svg className="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
-            <p className="text-sm">告诉我你的日程，我来帮你规划空闲时间</p>
+            <p className="text-sm">告诉我你最后一天的开始位置和赶车时间</p>
+            <p className="text-xs mt-1 text-slate-400">在「赶车安全边界」内给你最优体验</p>
           </div>
         )}
 
@@ -122,10 +124,23 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Last-day mode panel — shown before any chat */}
+      {messages.length === 0 && (
+        <div className="px-6 pb-2">
+          <LastDayModePanel
+            onSubmit={(input) => {
+              onPlan(input);
+              setShowExamples(false);
+            }}
+            loading={loading}
+          />
+        </div>
+      )}
+
       {/* Example Prompts */}
       {showExamples && messages.length === 0 && (
         <div className="px-6 pb-3">
-          <p className="text-[11px] text-slate-400 mb-2">试试这些：</p>
+          <p className="text-[11px] text-slate-400 mb-2">或者直接描述：</p>
           <div className="space-y-2">
             {EXAMPLE_PROMPTS.map((ex, i) => (
               <button

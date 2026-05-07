@@ -1,4 +1,4 @@
-import { Plan } from "@/types";
+import { Plan, RouteHop } from "@/types";
 import TimelineItem from "./TimelineItem";
 
 const planMeta: Record<string, {
@@ -12,7 +12,7 @@ const planMeta: Record<string, {
 }> = {
   balanced: {
     label: "均衡本地路线",
-    bestFor: "适合大多数出行者",
+    bestFor: "适合大多数最后一天",
     accentBg: "bg-blue-50",
     accentBorder: "border-blue-200",
     accentText: "text-blue-700",
@@ -20,8 +20,8 @@ const planMeta: Record<string, {
     icon: "🧭",
   },
   low_risk: {
-    label: "稳妥车站路线",
-    bestFor: "赶时间或带行李",
+    label: "稳妥赶车路线",
+    bestFor: "带行李或时间紧",
     accentBg: "bg-emerald-50",
     accentBorder: "border-emerald-200",
     accentText: "text-emerald-700",
@@ -39,15 +39,20 @@ const planMeta: Record<string, {
   },
 };
 
-function MiniConfidence({ value }: { value: number }) {
-  const color = value >= 85 ? "bg-emerald-500" : value >= 65 ? "bg-amber-500" : "bg-red-500";
-  const textColor = value >= 85 ? "text-emerald-600" : value >= 65 ? "text-amber-600" : "text-red-600";
+function MiniBar({ value, label, kind }: { value: number; label: string; kind: "safety" | "experience" }) {
+  const safetyColor = value >= 85 ? "bg-emerald-500" : value >= 65 ? "bg-amber-500" : "bg-red-500";
+  const safetyText = value >= 85 ? "text-emerald-600" : value >= 65 ? "text-amber-600" : "text-red-600";
+  const expColor = value >= 75 ? "bg-purple-500" : value >= 55 ? "bg-blue-500" : "bg-slate-400";
+  const expText = value >= 75 ? "text-purple-600" : value >= 55 ? "text-blue-600" : "text-slate-500";
+  const color = kind === "safety" ? safetyColor : expColor;
+  const textColor = kind === "safety" ? safetyText : expText;
   return (
     <div className="flex items-center gap-1.5">
-      <div className="w-14 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+      <span className="text-[11px] text-slate-400">{label}</span>
+      <div className="w-12 h-1.5 bg-slate-100 rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${value}%` }} />
       </div>
-      <span className={`text-[11px] font-mono font-semibold ${textColor}`}>{value}%</span>
+      <span className={`text-[11px] font-mono font-semibold ${textColor}`}>{value}</span>
     </div>
   );
 }
@@ -60,6 +65,47 @@ function Badge({ label, value, good }: { label: string; value: string; good: boo
     <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] border ${color}`}>
       {label} {value}
     </span>
+  );
+}
+
+function RouteChainView({ chain, dotColor, compact }: { chain: RouteHop[]; dotColor: string; compact?: boolean }) {
+  if (!chain || chain.length === 0) return null;
+  const stops = chain.filter((h) => h.kind === "stop");
+  const legs = chain.filter((h) => h.kind === "leg");
+  // Compose linear sequence: first leg.from is start, then stop.to (= place), interleaved with legs.
+  const seq: { name: string; legBefore?: RouteHop }[] = [];
+  if (legs[0]) seq.push({ name: legs[0].from });
+  let legIdx = 0;
+  for (const stop of stops) {
+    const leg = legs[legIdx];
+    legIdx++;
+    seq.push({ name: stop.from, legBefore: leg });
+  }
+  // Final leg to destination
+  const finalLeg = legs[legIdx];
+  if (finalLeg) seq.push({ name: finalLeg.to, legBefore: finalLeg });
+
+  if (seq.length === 0) return null;
+
+  return (
+    <div className={`flex items-center flex-wrap gap-y-1 ${compact ? "text-[10px]" : "text-[11px]"}`}>
+      {seq.map((node, idx) => (
+        <span key={idx} className="inline-flex items-center">
+          {node.legBefore && (
+            <span className="inline-flex items-center text-slate-400 mx-1">
+              <span className={`mr-0.5 ${node.legBefore.is_rush_hour ? "text-amber-500" : ""}`}>
+                ─{node.legBefore.travel_min}m{node.legBefore.is_rush_hour ? "⚠" : ""}─
+              </span>
+              <span>›</span>
+            </span>
+          )}
+          <span className="inline-flex items-center text-slate-700">
+            <span className={`w-1.5 h-1.5 rounded-full ${dotColor} mr-1`} />
+            <span className="font-medium">{node.name}</span>
+          </span>
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -106,37 +152,26 @@ export default function PlanCard({ plan, selected, onSelect }: PlanCardProps) {
           </div>
         </div>
 
-        {/* Distinctive one-line highlight to make the three options easy to compare */}
-        {!selected && plan.one_sentence_summary && (
-          <p className={`text-xs ${meta.accentText} bg-white/0 mb-2 leading-snug line-clamp-2`}>
-            {plan.one_sentence_summary}
+        {/* Trade-off one-line */}
+        {!selected && plan.tradeoff_summary && (
+          <p className={`text-xs ${meta.accentText} mb-2 leading-snug line-clamp-2`}>
+            {plan.tradeoff_summary}
           </p>
         )}
 
-        {/* Highlight stops chips for quick comparison */}
-        {!selected && (
-          <div className="flex items-center gap-1 flex-wrap mb-2">
-            {plan.timeline
-              .filter((t) => !["transport", "station_buffer"].includes(t.activity_type))
-              .slice(0, 4)
-              .map((t, i, arr) => (
-                <span key={i} className="inline-flex items-center text-[11px] text-slate-600">
-                  <span className={`w-1 h-1 rounded-full ${meta.dotColor} mr-1`} />
-                  {t.place_name}
-                  {i < arr.length - 1 && <span className="mx-1 text-slate-300">›</span>}
-                </span>
-              ))}
+        {/* Route chain */}
+        {!selected && plan.route_chain && plan.route_chain.length > 0 && (
+          <div className="mb-2">
+            <RouteChainView chain={plan.route_chain} dotColor={meta.dotColor} compact />
           </div>
         )}
 
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] text-slate-400">到站信心</span>
-            <MiniConfidence value={tags.station_arrival_confidence} />
-          </div>
-          <Badge label="步行量" value={tags.walking_intensity} good={tags.walking_intensity === "Low"} />
-          <Badge label="高峰影响" value={tags.rush_hour_exposure} good={tags.rush_hour_exposure === "Low"} />
-          <span className="text-[11px] text-slate-400">{stopCount}个停留点</span>
+        {/* Dual metrics */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <MiniBar value={tags.station_arrival_confidence} label="到站安全" kind="safety" />
+          <MiniBar value={tags.experience_score} label="体验分" kind="experience" />
+          <Badge label="步行" value={tags.walking_intensity} good={tags.walking_intensity === "Low"} />
+          <Badge label="高峰" value={tags.rush_hour_exposure} good={tags.rush_hour_exposure === "Low"} />
         </div>
 
         {!selected && (
@@ -150,11 +185,26 @@ export default function PlanCard({ plan, selected, onSelect }: PlanCardProps) {
       {/* Expanded detail — only when selected */}
       {selected && (
         <div className="border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
-          {/* Why this plan works */}
-          <div className="px-4 py-3 bg-slate-50/50">
-            <p className="text-[11px] font-medium text-slate-500 mb-1">为什么推荐这个方案</p>
-            <p className="text-xs text-slate-600 leading-relaxed">{plan.explanation}</p>
+          {/* Trade-off + explanation */}
+          <div className="px-4 py-3 bg-slate-50/50 space-y-2">
+            <div>
+              <p className="text-[11px] font-medium text-slate-500 mb-1">取舍说明</p>
+              <p className={`text-xs font-medium ${meta.accentText}`}>{plan.tradeoff_summary}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium text-slate-500 mb-1">为什么这样安排</p>
+              <p className="text-xs text-slate-600 leading-relaxed">{plan.explanation}</p>
+            </div>
           </div>
+
+          {/* Route chain visualization */}
+          {plan.route_chain && plan.route_chain.length > 0 && (
+            <div className="px-4 py-3 border-t border-slate-100">
+              <p className="text-[11px] font-medium text-slate-500 mb-2">空间-时间链路</p>
+              <RouteChainView chain={plan.route_chain} dotColor={meta.dotColor} />
+              <p className="text-[10px] text-slate-400 mt-1">数字 = 段间分钟数，⚠ = 处于晚高峰</p>
+            </div>
+          )}
 
           {/* Rush hour warning */}
           {plan.rush_hour_warning && (
