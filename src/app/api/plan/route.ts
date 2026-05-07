@@ -60,7 +60,12 @@ export async function POST(request: NextRequest) {
     }
 
     const extraConstraints = currentConstraints || {};
-    const baseResult = planTimeGapTrip(parseResult.constraints, extraConstraints, previousPlans);
+    const baseResult = planTimeGapTrip(
+      parseResult.constraints,
+      extraConstraints,
+      previousPlans,
+      { userText: userInput },
+    );
 
     // Best-effort Amap enrichment. On any failure or missing key the helper
     // returns the input unchanged, so the demo path keeps working.

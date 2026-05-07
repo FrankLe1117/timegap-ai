@@ -59,6 +59,16 @@ export interface TimeBudget {
   safe_activity_time_min: number;
   rush_hour_detected: boolean;
   rush_hour_note: string;
+  /** Detected terminal type used to size the buffer. */
+  terminal_kind?: "high_speed_rail" | "train" | "domestic_flight" | "international_flight" | "generic";
+  /** Short Chinese label, e.g. "高铁/火车", "国内航班", "国际航班". */
+  terminal_kind_label?: string;
+  /** Base minutes for the terminal kind, before per-trip add-ons. */
+  buffer_base_min?: number;
+  /** Per-reason add-ons that contribute to the final buffer. */
+  buffer_addons?: { label: string; minutes: number }[];
+  /** One-line Chinese explanation of how the buffer was chosen. */
+  buffer_reason?: string;
 }
 
 /**

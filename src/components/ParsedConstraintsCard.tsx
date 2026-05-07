@@ -73,7 +73,7 @@ export default function ParsedConstraintsCard({ constraints, timeBudget }: Props
             <p className="font-medium text-slate-700">约{timeBudget.estimated_final_transfer_min}分钟</p>
           </div>
           <div>
-            <span className="text-slate-400">安全余量</span>
+            <span className="text-slate-400">{timeBudget.terminal_kind_label || "终点"}缓冲</span>
             <p className="font-medium text-slate-700">{timeBudget.station_buffer_min}分钟</p>
           </div>
           <div>
@@ -81,6 +81,12 @@ export default function ParsedConstraintsCard({ constraints, timeBudget }: Props
             <p className="font-semibold text-red-600">{timeBudget.latest_leave_for_station}</p>
           </div>
         </div>
+        {timeBudget.buffer_reason && (
+          <div className="mt-2 pt-2 border-t border-slate-100 flex items-start gap-1.5 text-[11px] text-slate-500">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-1 shrink-0" />
+            <span className="leading-snug">{timeBudget.buffer_reason}</span>
+          </div>
+        )}
         {timeBudget.rush_hour_detected && (
           <div className="mt-2 pt-2 border-t border-slate-100 flex items-center gap-1.5 text-xs text-amber-700">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />

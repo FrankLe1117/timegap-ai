@@ -83,6 +83,7 @@ export default function TimelineItem({ item, isLast }: { item: TimelineItemType;
           )}
           {hasNavablePlace(item) && (
             <button
+              data-export-ignore="true"
               onClick={(e) => {
                 e.stopPropagation();
                 const url = item.amap_url
@@ -101,7 +102,7 @@ export default function TimelineItem({ item, isLast }: { item: TimelineItemType;
             </button>
           )}
           {isTransportLeg(item) && item.route_options && item.route_options.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <div className="mt-1.5 flex flex-wrap gap-1.5" data-export-ignore="true">
               {item.route_options.map((opt) => (
                 <button
                   key={`${opt.mode}-${opt.url}`}

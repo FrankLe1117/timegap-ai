@@ -9,9 +9,11 @@
     "lint": "eslint",
     "smoke:replacement": "node scripts/run-smoke.cjs",
     "smoke:zh-time": "node scripts/run-smoke-zh-time.cjs",
-    "smoke": "node scripts/run-smoke.cjs && node scripts/run-smoke-zh-time.cjs"
+    "smoke:buffer": "node scripts/run-smoke-buffer.cjs",
+    "smoke": "node scripts/run-smoke.cjs && node scripts/run-smoke-zh-time.cjs && node scripts/run-smoke-buffer.cjs"
   },
   "dependencies": {
+    "html-to-image": "^1.11.13",
     "next": "16.2.4",
     "react": "19.2.4",
     "react-dom": "19.2.4"

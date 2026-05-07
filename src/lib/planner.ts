@@ -4,6 +4,7 @@ import {
 } from "@/types";
 import cityGraph from "@/data/shanghai_city_graph.json";
 import { buildRouteOptions } from "./amap-client";
+import { decideTerminalBuffer } from "./terminal-buffer";
 
 const { nodes: allNodes, edges: allEdges } = cityGraph as {
   nodes: CityGraphNode[];
@@ -68,7 +69,10 @@ function getTravelTime(fromName: string, toName: string, departureTimeMin: numbe
   };
 }
 
-export function calculateTimeBudget(constraints: Constraints): TimeBudget {
+export function calculateTimeBudget(
+  constraints: Constraints,
+  options?: { userText?: string },
+): TimeBudget {
   const startMin = timeToMin(constraints.start_time);
   let departMin = timeToMin(constraints.departure_time);
 
@@ -80,22 +84,34 @@ export function calculateTimeBudget(constraints: Constraints): TimeBudget {
     departMin = startMin + 60;
   }
 
-  const isAirport = constraints.final_destination.includes("机场") ||
-    constraints.final_destination.toLowerCase().includes("airport");
-  const stationBuffer = isAirport ? 120 : 45;
-
-  const wantEarly = constraints.constraints.includes("safe_buffer") ||
-    constraints.preferences.includes("avoid_rushing");
-  const buffer = wantEarly && !isAirport ? 60 : stationBuffer;
+  // Decide the terminal-aware buffer. We do a first pass with a coarse
+  // arrival estimate (depart - base), then re-evaluate with the actual
+  // expected arrival once travel time is known.
+  const userText = options?.userText || "";
+  const firstPass = decideTerminalBuffer(constraints, {
+    arrivalMin: departMin - 60,
+    userText,
+  });
+  const recArrivalCoarse = departMin - firstPass.buffer_min;
+  const finalTransfer = getTravelTime(
+    constraints.start_location,
+    constraints.final_destination,
+    recArrivalCoarse - 40,
+  );
+  const arrivalAtTerminalEstimate = departMin - firstPass.buffer_min;
+  const decision = decideTerminalBuffer(constraints, {
+    arrivalMin: arrivalAtTerminalEstimate,
+    userText,
+  });
+  const buffer = decision.buffer_min;
 
   const recArrival = departMin - buffer;
-  const finalTransfer = getTravelTime(constraints.start_location, constraints.final_destination, recArrival - 40);
   const latestLeave = recArrival - finalTransfer.minutes;
 
   const finalTransferRush = isRushHour(latestLeave);
   let rushNote = "";
   if (finalTransferRush) {
-    rushNote = `前往${constraints.final_destination}的时间落在晚高峰时段（17:00–19:30），通勤时间已自动增加。建议将晚餐安排在虹桥附近以降低误车风险。`;
+    rushNote = `前往${constraints.final_destination}的时间落在晚高峰时段（17:00–19:30），通勤时间已自动增加。建议将晚餐安排在${decision.kind_label}附近以降低误车风险。`;
   }
 
   return {
@@ -107,6 +123,11 @@ export function calculateTimeBudget(constraints: Constraints): TimeBudget {
     safe_activity_time_min: Math.max(latestLeave - startMin - finalTransfer.minutes, 0),
     rush_hour_detected: finalTransferRush,
     rush_hour_note: rushNote,
+    terminal_kind: decision.terminal_kind,
+    terminal_kind_label: decision.kind_label,
+    buffer_base_min: decision.base_min,
+    buffer_addons: decision.addons,
+    buffer_reason: decision.reason,
   };
 }
 
@@ -226,14 +247,17 @@ function buildTimeline(
   });
 
   const departMin = timeToMin(constraints.departure_time);
+  const bufferReason = timeBudget.buffer_reason
+    ? timeBudget.buffer_reason
+    : `预留${timeBudget.station_buffer_min}分钟安全余量`;
   timeline.push({
     start_time: minToTime(arrivalAtStation),
     end_time: minToTime(departMin),
-    title: "到达车站，等候出发",
+    title: "到达终点，等候出发",
     place_name: constraints.final_destination,
     place_id: findNodeIdByName(constraints.final_destination),
     activity_type: "station_buffer",
-    reason: `预留${timeBudget.station_buffer_min}分钟安全余量`,
+    reason: bufferReason,
     estimated_travel_time_to_next_min: null,
   });
 
@@ -683,7 +707,8 @@ function computeReplanChanges(
 export function planTimeGapTrip(
   constraints: Constraints,
   extraConstraints?: Record<string, unknown>,
-  previousPlans?: Plan[]
+  previousPlans?: Plan[],
+  options?: { userText?: string },
 ): PlanResponse {
   const merged: Constraints = {
     ...constraints,
@@ -695,7 +720,7 @@ export function planTimeGapTrip(
     ...(extraConstraints?.budget_per_person !== undefined ? { budget_per_person: extraConstraints.budget_per_person as number } : {}),
   };
 
-  const timeBudget = calculateTimeBudget(merged);
+  const timeBudget = calculateTimeBudget(merged, { userText: options?.userText });
   const failureNote = checkFailureProtection(merged, timeBudget);
 
   const plans: Plan[] = [
