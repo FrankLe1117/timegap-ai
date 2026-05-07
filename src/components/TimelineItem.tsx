@@ -28,6 +28,15 @@ const hasNavablePlace = (item: TimelineItemType): boolean => {
   return !["transport", "station_buffer"].includes(item.activity_type) && !!item.place_name;
 };
 
+const isTransportLeg = (item: TimelineItemType): boolean => item.activity_type === "transport";
+
+const routeChipClasses: Record<string, string> = {
+  transit: "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100",
+  driving: "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
+  walking: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+  search: "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+};
+
 export default function TimelineItem({ item, isLast }: { item: TimelineItemType; isLast: boolean }) {
   return (
     <div className="flex gap-3">
@@ -73,6 +82,23 @@ export default function TimelineItem({ item, isLast }: { item: TimelineItemType;
               </svg>
               在高德打开
             </button>
+          )}
+          {isTransportLeg(item) && item.route_options && item.route_options.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {item.route_options.map((opt) => (
+                <button
+                  key={`${opt.mode}-${opt.url}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.open(opt.url, "_blank");
+                  }}
+                  className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border transition-colors ${routeChipClasses[opt.mode] || routeChipClasses.search}`}
+                  title={`在高德打开${opt.label}`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           )}
         </div>
       </div>

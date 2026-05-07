@@ -28,6 +28,7 @@ import {
   buildAmapMarkerUrl,
   buildAmapNavigationUrl,
   buildAmapSearchUrl,
+  buildRouteOptions,
   estimateRoute,
   isAmapConfigured,
 } from "./amap-client";
@@ -222,6 +223,7 @@ async function rebuildTimelineWithCoords(
       lng: toCoord?.lng,
       lat: toCoord?.lat,
       amap_url: transportAmapUrl,
+      route_options: buildRouteOptions(prevName, s.item.place_name, prevCoord, toCoord),
     };
     newTimeline.push(transportItem);
     chain.push({
@@ -293,6 +295,7 @@ async function rebuildTimelineWithCoords(
     lng: destCoord?.lng,
     lat: destCoord?.lat,
     amap_url: finalAmapUrl,
+    route_options: buildRouteOptions(prevName, destinationName, prevCoord, destCoord),
   });
   chain.push({
     from: prevName,

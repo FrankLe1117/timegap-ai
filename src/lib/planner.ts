@@ -3,6 +3,7 @@ import {
   TimelineItem, SuitabilityTags, ReplanChange, PlanResponse, RouteHop,
 } from "@/types";
 import cityGraph from "@/data/shanghai_city_graph.json";
+import { buildRouteOptions } from "./amap-client";
 
 const { nodes: allNodes, edges: allEdges } = cityGraph as {
   nodes: CityGraphNode[];
@@ -179,6 +180,7 @@ function buildTimeline(
         estimated_travel_time_to_next_min: null,
         travel_mode: travel.mode,
         is_rush_hour: travel.isRush,
+        route_options: buildRouteOptions(currentLocation, stop.node.name),
       });
       currentMin = arrivalMin;
     }
@@ -212,6 +214,7 @@ function buildTimeline(
     estimated_travel_time_to_next_min: finalTravel.minutes,
     travel_mode: finalTravel.mode,
     is_rush_hour: finalTravel.isRush,
+    route_options: buildRouteOptions(currentLocation, constraints.final_destination),
   });
 
   const departMin = timeToMin(constraints.departure_time);

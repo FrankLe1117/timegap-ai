@@ -61,6 +61,17 @@ export interface TimeBudget {
   rush_hour_note: string;
 }
 
+/**
+ * A single navigation/route option attached to a transport timeline leg.
+ * Multiple options (e.g. driving + transit) can be presented side-by-side so
+ * the user can open Amap directly into the correct routing mode.
+ */
+export interface RouteOption {
+  mode: "driving" | "transit" | "walking" | "search";
+  label: string;
+  url: string;
+}
+
 export interface TimelineItem {
   start_time: string;
   end_time: string;
@@ -77,6 +88,12 @@ export interface TimelineItem {
   lat?: number;
   /** Optional Amap-built navigation URL. */
   amap_url?: string;
+  /**
+   * For transport legs: list of concrete Amap route URLs (driving / transit /
+   * walking / search-fallback). Empty/undefined when we don't know the
+   * origin coordinate or the leg is a non-transport stop.
+   */
+  route_options?: RouteOption[];
   /** Where the place came from. Demo (city graph) is the default. */
   source?: "demo" | "amap" | "meituan";
   /** [0,1] candidate score when the stop was inserted from a real candidate pool. */

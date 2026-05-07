@@ -353,3 +353,53 @@ export function buildAmapNavigationUrl(
   });
   return `https://uri.amap.com/navigation?${params.toString()}`;
 }
+
+/**
+ * Build a name-based Amap route URL when we don't have one or both
+ * coordinates. Falls back to /amap/?from=&to=&type= which the web map honors
+ * for keyword origin/destination lookups. Mode is encoded as `t` per Amap
+ * convention: 0 = driving, 1 = transit, 2 = walking.
+ */
+export function buildAmapRouteByNameUrl(
+  fromName: string,
+  toName: string,
+  mode: AmapTravelMode = "driving",
+  city = "上海",
+): string {
+  const tMap: Record<AmapTravelMode, string> = { driving: "0", transit: "1", walking: "2" };
+  const params = new URLSearchParams({
+    from: `${fromName},${city}`,
+    to: `${toName},${city}`,
+    type: tMap[mode],
+    src: "TimeGap AI",
+    callnative: "1",
+  });
+  return `https://uri.amap.com/route?${params.toString()}`;
+}
+
+/**
+ * Build a list of Amap route options for a transport leg. When both
+ * coordinates are present, prefers the navigation URI (deep-links into the
+ * mobile app). Otherwise falls back to the keyword-based /route URL so the
+ * user still gets a routing experience instead of a single marker.
+ */
+export function buildRouteOptions(
+  fromName: string,
+  toName: string,
+  fromCoord?: AmapCoord | null,
+  toCoord?: AmapCoord | null,
+): Array<{ mode: "driving" | "transit" | "walking" | "search"; label: string; url: string }> {
+  const opts: Array<{ mode: "driving" | "transit" | "walking" | "search"; label: string; url: string }> = [];
+
+  const addNav = (mode: AmapTravelMode, label: string) => {
+    if (fromCoord && toCoord) {
+      opts.push({ mode, label, url: buildAmapNavigationUrl(fromCoord, toCoord, toName, mode) });
+    } else {
+      opts.push({ mode, label, url: buildAmapRouteByNameUrl(fromName, toName, mode) });
+    }
+  };
+
+  addNav("transit", "地铁/公交路线");
+  addNav("driving", "驾车路线");
+  return opts;
+}

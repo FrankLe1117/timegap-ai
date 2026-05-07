@@ -17,6 +17,7 @@ import {
   buildAmapMarkerUrl,
   buildAmapNavigationUrl,
   buildAmapSearchUrl,
+  buildRouteOptions,
   estimateRoute,
   geocodePlace,
   isAmapConfigured,
@@ -129,6 +130,7 @@ export async function enrichPlanWithAmap(input: PlanResponse): Promise<PlanRespo
               : toPoi
                 ? buildAmapMarkerUrl(item.place_name, toPoi.coord)
                 : buildAmapSearchUrl(item.place_name),
+          route_options: buildRouteOptions(prevPlace, item.place_name, prevPoi?.coord, toPoi?.coord),
         };
         newTimeline.push(updated);
         deltaMin += newDur - originalDur;
