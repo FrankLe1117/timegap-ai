@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
+    "dev:turbo": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "reset:dev": "rm -rf .next .turbo node_modules/.cache",
     "smoke:replacement": "node scripts/run-smoke.cjs",
     "smoke:zh-time": "node scripts/run-smoke-zh-time.cjs",
     "smoke:buffer": "node scripts/run-smoke-buffer.cjs",
