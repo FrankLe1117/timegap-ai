@@ -179,6 +179,17 @@ export async function POST(request: NextRequest) {
             });
           },
           startCoord,
+          // Search hints used to build an Amap search URL for the manual-
+          // confirm placeholder when no replacement POI was found. Falls back
+          // to city + cuisine when we have nothing more specific.
+          () => ({
+            city,
+            cuisine: cuisineHints[0],
+            // The resolver doesn't currently surface a structured area for
+            // repair duplicates, so we omit it here and let the search query
+            // default to "<city> <cuisine|餐厅>".
+            area: undefined,
+          }),
         );
         sanitized = repaired.response;
       } else {

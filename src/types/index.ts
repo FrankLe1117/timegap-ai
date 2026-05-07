@@ -117,8 +117,22 @@ export interface TimelineItem {
    * or a directional suggestion ("徐汇区附近一家本帮菜小馆") that the UI must
    * NOT decorate with a map link. Absent → treated as "poi" for backwards
    * compatibility.
+   *
+   * `"search"` is a manual-confirm placeholder: Amap was reachable but no
+   * reliable POI clears the gate, so we surface an Amap *search* URL
+   * (`search_url`) for the user to pick a place themselves. The UI must label
+   * this as a search/confirm link, NOT a verified destination.
    */
-  place_kind?: "poi" | "directional";
+  place_kind?: "poi" | "directional" | "search";
+  /**
+   * Amap keyword-search URL for `place_kind: "search"` stops. Opens Amap with
+   * a city + cuisine/area query so the user can pick a real shop. Never
+   * present on `"poi"` stops — those use `amap_url` instead.
+   */
+  search_url?: string;
+  /** Human-readable summary of what `search_url` will search for, e.g.
+   *  "人民广场 本帮菜". Surfaced in the UI tooltip / accessibility label. */
+  search_query?: string;
 }
 
 export interface SuitabilityTags {

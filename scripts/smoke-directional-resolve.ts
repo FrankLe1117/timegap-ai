@@ -296,18 +296,34 @@ function makeDeps(pois: AmapPoi[]): AmapSearchDeps {
     (t) => t.activity_type !== "transport" && t.activity_type !== "station_buffer",
   );
   const s = stops[0];
-  ok(s.place_kind === "directional", "stop remains directional");
-  ok(!s.amap_url, "stop has no amap_url");
+  // Stop is now an actionable manual-search placeholder (not a verified POI).
+  ok(s.place_kind === "search" || s.place_kind === "directional", `stop is not poi (got ${s.place_kind})`);
+  ok(!s.amap_url, "stop has no amap_url (no verified POI)");
   ok(s.lng == null && s.lat == null, "stop has no coords");
   ok(s.place_name === "需要手动确认餐馆", `place_name upgraded to manual confirm (got ${s.place_name})`);
   ok(!/方向建议/.test(s.place_name), "place_name no longer reads as generic 方向建议");
   ok(s.title === "晚餐：需要手动确认餐馆", `title rewritten (got ${s.title})`);
-  // Transport leg follows the rewrite, with no fake map link.
+  // search-style placeholder must carry an actionable Amap search link.
+  if (s.place_kind === "search") {
+    ok(!!s.search_url && /uri\.amap\.com\/search/.test(s.search_url), `search_url present (got ${s.search_url})`);
+    ok(!!s.search_query && s.search_query.length > 0, `search_query present (got ${s.search_query})`);
+  }
+  // Transport leg follows the rewrite, with no fake verified-POI map link.
   const leg = response.plans[0].timeline.find((t) => t.activity_type === "transport")!;
   ok(leg.place_name === "需要手动确认餐馆", `transport leg place_name updated (got ${leg.place_name})`);
   ok(leg.title === "前往需要手动确认餐馆", `transport title updated (got ${leg.title})`);
   ok(!leg.amap_url, "transport leg has no amap_url");
   ok(!leg.lng && !leg.lat, "transport leg coords cleared");
+  // When the stop is a search-confirm, the leg should carry the same search
+  // affordance — never a regular driving/transit route_options list.
+  if (s.place_kind === "search") {
+    ok(leg.place_kind === "search", `leg place_kind=search (got ${leg.place_kind})`);
+    ok(!!leg.search_url, "leg has search_url");
+    ok(
+      Array.isArray(leg.route_options) && leg.route_options.length === 1 && leg.route_options[0].mode === "search",
+      `leg route_options is single search-mode entry (got ${JSON.stringify(leg.route_options)})`,
+    );
+  }
   // Pure manual-confirm pass should not flip dataSources.candidatesUsed.
   ok(response.dataSources.candidatesUsed !== true, "manual-confirm: candidatesUsed not flipped on");
 }
@@ -323,7 +339,7 @@ function makeDeps(pois: AmapPoi[]): AmapSearchDeps {
   ok(resolvedTotal === 0, "resolvedTotal === 0 with no POIs");
   ok(manualConfirmTotal === 1, `manualConfirmTotal === 1 (got ${manualConfirmTotal})`);
   const s = response.plans[0].timeline.find((t) => t.activity_type === "dinner")!;
-  ok(s.place_kind === "directional", "stop stays directional with empty results");
+  ok(s.place_kind === "search" || s.place_kind === "directional", `stop is not poi (got ${s.place_kind})`);
   ok(s.place_name === "需要手动确认餐馆", `place_name upgraded (got ${s.place_name})`);
 }
 
@@ -552,9 +568,9 @@ const onlyConfirmedPoi: AmapPoi = {
   ok(concrete.length === 1, `dedupe: exactly one concrete POI in plan (got ${concrete.length})`);
   ok(concrete[0].place_name === onlyConfirmedPoi.name, "dedupe: earlier slot kept the POI");
 
-  const directional = stops.filter((s) => s.place_kind === "directional");
-  ok(directional.length === 1, `dedupe: later slot stayed directional (got ${directional.length})`);
-  ok(!directional[0].amap_url, "dedupe: directional fallback has no amap_url");
+  const directional = stops.filter((s) => s.place_kind === "directional" || s.place_kind === "search");
+  ok(directional.length === 1, `dedupe: later slot stayed directional/search (got ${directional.length})`);
+  ok(!directional[0].amap_url, "dedupe: directional fallback has no amap_url (no verified POI)");
   ok(directional[0].lng == null && directional[0].lat == null, "dedupe: directional fallback has no coords");
 
   // No transport title 前往<same place> linking the two identical concrete stops.
@@ -970,7 +986,10 @@ const onlyConfirmedPoi: AmapPoi = {
   ok(manualConfirmTotal === 1, `cascade-exhausted: manualConfirm fired (got ${manualConfirmTotal})`);
   ok(levelsAttempted >= 4, `cascade-exhausted: tried multiple levels before manual confirm (got ${levelsAttempted})`);
   const dinner = response.plans[0].timeline.find((t) => t.activity_type === "dinner")!;
-  ok(dinner.place_kind === "directional", "cascade-exhausted: stays directional");
+  ok(
+    dinner.place_kind === "directional" || dinner.place_kind === "search",
+    `cascade-exhausted: stays non-poi (got ${dinner.place_kind})`,
+  );
   ok(dinner.place_name === "需要手动确认餐馆", `cascade-exhausted: manual-confirm placeholder (got ${dinner.place_name})`);
 }
 
@@ -1639,7 +1658,10 @@ function buildScreenshotResponse(): PlanResponse {
   ok(resolvedTotal === 0, "screenshot/manual: resolvedTotal=0");
   ok(manualConfirmTotal === 1, `screenshot/manual: manualConfirmTotal=1 (got ${manualConfirmTotal})`);
   const dinner = response.plans[0].timeline.find((t) => t.activity_type === "dinner")!;
-  ok(dinner.place_kind === "directional", "screenshot/manual: dinner stays directional");
+  ok(
+    dinner.place_kind === "directional" || dinner.place_kind === "search",
+    `screenshot/manual: dinner is non-poi (got ${dinner.place_kind})`,
+  );
   ok(dinner.place_name === "需要手动确认餐馆", `screenshot/manual: place_name (got ${dinner.place_name})`);
   ok(dinner.title === "晚餐：需要手动确认餐馆", `screenshot/manual: title (got ${dinner.title})`);
   ok(!dinner.amap_url, "screenshot/manual: no amap_url on stop");
@@ -1667,6 +1689,350 @@ function buildScreenshotResponse(): PlanResponse {
   }
   // dataSources should NOT pretend amap was used.
   ok(response.dataSources.candidatesUsed !== true, "screenshot/manual: candidatesUsed not flipped");
+}
+
+/* -------------------------------------------------------------------------- */
+/* 8. Search-confirm placeholder + relaxed reliability gate                   */
+/* -------------------------------------------------------------------------- */
+
+// 8a. Reliability gate accepts a restaurant POI even when the upstream Amap
+// response omitted `address`. Type/category alone — plus a real id, valid
+// coord, and non-synthetic name — is enough.
+{
+  const noAddressPoi: AmapPoi = {
+    id: "B0FFGRX_NA",
+    name: "上海老饭店",
+    address: "", // Amap place/around routinely omits this.
+    coord: { lng: 121.493, lat: 31.227 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  ok(
+    isPoiReliableForActivity(noAddressPoi, "dinner", { lng: 121.49, lat: 31.23 }),
+    "gate-relaxed: real restaurant w/o address still passes",
+  );
+  // Cafe equivalent.
+  const noAddressCafe: AmapPoi = {
+    id: "B0FFGRX_NC",
+    name: "Manner Coffee",
+    address: undefined as unknown as string,
+    coord: { lng: 121.42, lat: 31.20 },
+    type: "餐饮服务;咖啡厅;咖啡厅",
+    district: "徐汇区",
+    hasRealId: true,
+  };
+  ok(
+    isPoiReliableForActivity(noAddressCafe, "coffee", { lng: 121.42, lat: 31.20 }),
+    "gate-relaxed: real cafe w/o address still passes",
+  );
+}
+
+// 8b. Cuisine fails, broad "餐厅"/"美食" succeeds — concrete POI selected,
+// reason stays honest. Asserts cascade actually short-circuits at L3.
+{
+  const realPoi: AmapPoi = {
+    id: "B0FFGRX_BROAD",
+    name: "新雅粤菜馆",
+    address: "黄浦区南京东路719号",
+    coord: { lng: 121.484, lat: 31.235 },
+    type: "餐饮服务;中餐厅;粤菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  let attempts = 0;
+  const deps: AmapSearchDeps = {
+    searchByKeyword: async (q) => {
+      attempts += 1;
+      // Only generic "<area> 餐厅"/"<area> 美食"/"<area> 中餐厅"/"<area> 小馆"
+      // returns a POI. Specific cuisines and bare-cuisine queries return [].
+      return /\s(餐厅|美食|小馆|中餐厅)$/.test(q) ? [realPoi] : [];
+    },
+    searchNearby: async (_a, q) => {
+      attempts += 1;
+      return /\s(餐厅|美食|小馆|中餐厅)$/.test(q) ? [realPoi] : [];
+    },
+  };
+  const intent = {
+    area: "人民广场",
+    category: "本帮菜",
+    activity: "dinner" as TimelineItem["activity_type"],
+  };
+  const pick = await resolveDirectionalStop(
+    intent,
+    { lng: 121.48, lat: 31.23 },
+    "上海",
+    deps,
+    new Set<string>(),
+    { cuisineHints: [] },
+  );
+  ok(pick !== null, "broad-fallback: picked POI from broad 餐厅 cascade level");
+  ok(pick && pick.name === realPoi.name, `broad-fallback: picked ${realPoi.name}`);
+  ok(attempts >= 3, `broad-fallback: cascade tried multiple levels (got ${attempts})`);
+}
+
+// 8c. No anchor (city-only keyword search) still finds a POI.
+{
+  const realPoi: AmapPoi = {
+    id: "B0FFGRX_CITY",
+    name: "上海德兴馆(广东路店)",
+    address: "黄浦区广东路471号",
+    coord: { lng: 121.481, lat: 31.234 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  let nearbyCalls = 0;
+  let keywordCalls = 0;
+  const deps: AmapSearchDeps = {
+    searchByKeyword: async () => { keywordCalls += 1; return [realPoi]; },
+    searchNearby: async () => { nearbyCalls += 1; return []; },
+  };
+  const intent = {
+    area: undefined,
+    category: "本帮菜",
+    activity: "lunch" as TimelineItem["activity_type"],
+  };
+  const pick = await resolveDirectionalStop(
+    intent,
+    null, // No anchor.
+    "上海",
+    deps,
+    new Set<string>(),
+    { cuisineHints: ["本帮菜"] },
+  );
+  ok(pick !== null, "no-anchor: city-only keyword search still resolves");
+  ok(pick && pick.id === realPoi.id, "no-anchor: picked the real POI");
+  ok(nearbyCalls === 0, `no-anchor: never called searchNearby (got ${nearbyCalls})`);
+  ok(keywordCalls >= 1, `no-anchor: did call searchByKeyword (got ${keywordCalls})`);
+}
+
+// 8d. Duplicate skipped without blocking other candidates: when usedKeys
+// already contains the first POI, the resolver still picks the second.
+{
+  const dupPoi: AmapPoi = {
+    id: "B0FFGRX_DUP",
+    name: "上海老饭店",
+    address: "黄浦区福佑路242号",
+    coord: { lng: 121.493, lat: 31.227 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  const altPoi: AmapPoi = {
+    id: "B0FFGRX_ALT2",
+    name: "绿波廊",
+    address: "黄浦区豫园路115号",
+    coord: { lng: 121.491, lat: 31.226 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  const deps: AmapSearchDeps = {
+    searchByKeyword: async () => [dupPoi, altPoi],
+    searchNearby: async () => [dupPoi, altPoi],
+  };
+  const used = new Set<string>([`id:${dupPoi.id}`]);
+  const pick = await resolveDirectionalStop(
+    {
+      area: "黄浦区",
+      category: "本帮菜",
+      activity: "dinner" as TimelineItem["activity_type"],
+    },
+    { lng: 121.49, lat: 31.23 },
+    "上海",
+    deps,
+    used,
+  );
+  ok(pick !== null, "dup-skip: alt POI returned even when first is in usedKeys");
+  ok(pick && pick.id === altPoi.id, `dup-skip: picked alt POI (id=${pick && pick.id})`);
+}
+
+// 8e. Zero Amap candidates -> manual confirm carries an actionable Amap
+// search URL clearly labeled as search/confirm, not a verified destination.
+{
+  const directionalDinnerPP: TimelineItem = {
+    start_time: "18:30",
+    end_time: "19:30",
+    title: "晚餐：人民广场附近找一家本帮菜小馆",
+    place_name: "人民广场附近找一家本帮菜小馆（方向建议）",
+    activity_type: "dinner",
+    reason: "演示版未绑定具体店铺，已转为方向建议",
+    estimated_travel_time_to_next_min: null,
+    place_kind: "directional",
+    source: "demo",
+  };
+  const resp = buildResponse(directionalDinnerPP);
+  const deps = makeDeps([]);
+  const { response, manualConfirmTotal } = await resolveDirectionalSuggestions(resp, {
+    startCoord: { lng: 121.48, lat: 31.23 },
+    deps,
+    cuisineHints: ["本帮菜"],
+  });
+  ok(manualConfirmTotal === 1, `search-confirm: manualConfirmTotal=1 (got ${manualConfirmTotal})`);
+  const dinner = response.plans[0].timeline.find((t) => t.activity_type === "dinner")!;
+  ok(dinner.place_kind === "search", `search-confirm: place_kind=search (got ${dinner.place_kind})`);
+  ok(!!dinner.search_url, "search-confirm: search_url present");
+  ok(/uri\.amap\.com\/search/.test(dinner.search_url || ""), `search-confirm: search_url is Amap search URL (got ${dinner.search_url})`);
+  ok(/keyword=/.test(dinner.search_url || ""), "search-confirm: search_url has keyword param");
+  ok(/city=/.test(dinner.search_url || ""), "search-confirm: search_url has city param");
+  // Cuisine should land in the search query (本帮菜 from intent or hints).
+  ok(
+    /(%E6%9C%AC%E5%B8%AE%E8%8F%9C|%E8%80%81%E5%AD%97%E5%8F%B7|%E9%A4%90%E5%8E%85)/.test(dinner.search_url || ""),
+    `search-confirm: keyword carries cuisine/category (got ${dinner.search_url})`,
+  );
+  ok(!!dinner.search_query && dinner.search_query.length > 0, `search-confirm: search_query present (got ${dinner.search_query})`);
+  ok(!dinner.amap_url, "search-confirm: NOT a verified POI marker URL");
+  ok(dinner.lng == null && dinner.lat == null, "search-confirm: no coords");
+  // The reason should mention search/confirm — never claim it's a verified POI.
+  ok(/搜索|手动选择/.test(dinner.reason || ""), `search-confirm: reason mentions search/manual (got ${dinner.reason})`);
+  // Transport leg follows: place_kind=search and same search_url; route_options
+  // contains a single search-mode entry (NOT driving/transit).
+  const leg = response.plans[0].timeline.find((t) => t.activity_type === "transport")!;
+  ok(leg.place_kind === "search", `search-confirm: leg place_kind=search (got ${leg.place_kind})`);
+  ok(leg.search_url === dinner.search_url, "search-confirm: leg shares stop's search_url");
+  ok(!leg.amap_url, "search-confirm: leg has no verified-POI amap_url");
+  ok(
+    Array.isArray(leg.route_options) && leg.route_options.length === 1 && leg.route_options[0].mode === "search",
+    `search-confirm: leg route_options is single search-mode entry (got ${JSON.stringify(leg.route_options)})`,
+  );
+  ok(
+    /搜索|确认/.test(leg.route_options?.[0].label || ""),
+    `search-confirm: leg route_options label reads as search/confirm (got ${leg.route_options?.[0].label})`,
+  );
+}
+
+// 8f. Honest UI/export labeling: the search-confirm stop must NEVER claim
+// to be amap-confirmed. dataSources.candidatesUsed must remain false when
+// only a search link is surfaced.
+{
+  const directionalDinnerHonest: TimelineItem = {
+    start_time: "18:30",
+    end_time: "19:30",
+    title: "晚餐：人民广场附近找一家本帮菜小馆",
+    place_name: "人民广场附近找一家本帮菜小馆（方向建议）",
+    activity_type: "dinner",
+    reason: "演示版未绑定具体店铺，已转为方向建议",
+    estimated_travel_time_to_next_min: null,
+    place_kind: "directional",
+    source: "demo",
+  };
+  const resp = buildResponse(directionalDinnerHonest);
+  const deps = makeDeps([]);
+  const { response } = await resolveDirectionalSuggestions(resp, {
+    startCoord: { lng: 121.48, lat: 31.23 },
+    deps,
+    cuisineHints: ["本帮菜"],
+  });
+  const dinner = response.plans[0].timeline.find((t) => t.activity_type === "dinner")!;
+  // Honest source: not amap-confirmed.
+  ok(dinner.source !== "amap" || dinner.candidate_reliability !== "confirmed", "honest: search stop is NOT marked confirmed-amap");
+  ok(response.dataSources.candidatesUsed !== true, "honest: dataSources.candidatesUsed not flipped");
+  ok(
+    !(response.dataSources.candidateSources || []).includes("amap"),
+    "honest: candidateSources does NOT include amap",
+  );
+}
+
+// 8g. Coffee directional with empty Amap also gets a search link (cafe-style).
+{
+  const dirCoffee: TimelineItem = {
+    start_time: "15:30",
+    end_time: "16:30",
+    title: "咖啡休息：武康路附近找一家咖啡馆",
+    place_name: "武康路附近找一家咖啡馆休息（方向建议）",
+    activity_type: "coffee",
+    reason: "演示版未绑定具体店铺，已转为方向建议",
+    estimated_travel_time_to_next_min: null,
+    place_kind: "directional",
+    source: "demo",
+  };
+  const resp = buildResponse(dirCoffee);
+  const deps = makeDeps([]);
+  const { response } = await resolveDirectionalSuggestions(resp, {
+    startCoord: { lng: 121.42, lat: 31.20 },
+    deps,
+  });
+  const coffee = response.plans[0].timeline.find((t) => t.activity_type === "coffee")!;
+  ok(coffee.place_kind === "search", `search-coffee: place_kind=search (got ${coffee.place_kind})`);
+  ok(coffee.place_name === "需要手动确认咖啡馆", `search-coffee: cafe-specific copy (got ${coffee.place_name})`);
+  ok(!!coffee.search_url, "search-coffee: search_url present");
+  ok(
+    /(%E5%92%96%E5%95%A1)/.test(coffee.search_url || ""),
+    `search-coffee: keyword carries 咖啡 (got ${coffee.search_url})`,
+  );
+}
+
+// 8h. plan-dedupe.repairPlanDuplicatesWithAmap with searchHintsFor: when
+// resolver returns null, the duplicate gets a search-confirm placeholder
+// and the transport leg gets a search-mode chip. Mirrors the API route's
+// final-guard duplicate repair path.
+{
+  const sharedPoi: AmapPoi = {
+    id: "B0FFGRX001",
+    name: "上海老饭店",
+    address: "黄浦区福佑路242号",
+    coord: { lng: 121.493, lat: 31.227 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  const lunchStop: TimelineItem = {
+    start_time: "12:00", end_time: "13:00",
+    title: `午餐：${sharedPoi.name}`, place_name: sharedPoi.name,
+    place_id: sharedPoi.id, activity_type: "lunch",
+    reason: "高德验证", estimated_travel_time_to_next_min: null,
+    lng: sharedPoi.coord.lng, lat: sharedPoi.coord.lat,
+    amap_url: "https://uri.amap.com/marker?dummy",
+    source: "amap", candidate_reliability: "confirmed", place_kind: "poi",
+  };
+  const dinnerStop: TimelineItem = { ...lunchStop, start_time: "18:30", end_time: "19:30", title: `晚餐：${sharedPoi.name}`, activity_type: "dinner" };
+  const tx1: TimelineItem = {
+    start_time: "11:30", end_time: "12:00",
+    title: `前往${sharedPoi.name}`, place_name: sharedPoi.name,
+    activity_type: "transport", reason: "驾车", estimated_travel_time_to_next_min: null,
+    travel_mode: "驾车/打车",
+  };
+  const tx2: TimelineItem = { ...tx1, start_time: "18:00", end_time: "18:30" };
+  const dupPlan: Plan = {
+    plan_name: "p", plan_type: "balanced", one_sentence_summary: "", tradeoff_summary: "",
+    suitability_tags: {
+      time_safety: "High", rush_hour_exposure: "Low", walking_intensity: "Low",
+      local_experience: "High", luggage_friendly: "High", weather_robustness: "High",
+      station_arrival_confidence: 80, experience_score: 70,
+    },
+    timeline: [tx1, lunchStop, tx2, dinnerStop],
+    route_chain: [
+      { from: "起点", to: sharedPoi.name, travel_min: 30, kind: "leg" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 0, kind: "stop", stop_duration_min: 60, activity_type: "lunch" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 30, kind: "leg" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 0, kind: "stop", stop_duration_min: 60, activity_type: "dinner" },
+    ],
+    latest_leave_for_station: "21:00", risk_note: "", backup_suggestion: "", explanation: "",
+  };
+  const { plan: repaired } = await repairPlanDuplicatesWithAmap(
+    dupPlan,
+    async () => null, // No replacement found.
+    { lng: 121.49, lat: 31.23 },
+    () => ({ city: "上海", cuisine: "本帮菜", area: "人民广场" }),
+  );
+  const stops = repaired.timeline.filter((t) => t.activity_type !== "transport" && t.activity_type !== "station_buffer");
+  ok(stops[1].place_kind === "search", `dedupe-search: dup converted to search (got ${stops[1].place_kind})`);
+  ok(stops[1].place_name === "需要手动确认餐馆", "dedupe-search: manual-confirm copy");
+  ok(!!stops[1].search_url, "dedupe-search: stop has search_url");
+  ok(/keyword=/.test(stops[1].search_url || ""), "dedupe-search: search_url has keyword");
+  ok(!!stops[1].search_query, "dedupe-search: stop has search_query");
+  ok(!stops[1].amap_url, "dedupe-search: NOT a verified POI link");
+  // Transport leg.
+  const transports = repaired.timeline.filter((t) => t.activity_type === "transport");
+  const lastTransport = transports[transports.length - 1];
+  ok(lastTransport.place_kind === "search", `dedupe-search: leg place_kind=search`);
+  ok(lastTransport.search_url === stops[1].search_url, "dedupe-search: leg shares stop's search_url");
+  ok(!lastTransport.amap_url, "dedupe-search: leg has no verified amap_url");
+  ok(
+    Array.isArray(lastTransport.route_options) && lastTransport.route_options.length === 1 && lastTransport.route_options[0].mode === "search",
+    `dedupe-search: leg route_options is single search-mode entry`,
+  );
 }
 
 console.log("\nALL DIRECTIONAL-RESOLVER SMOKE ASSERTIONS PASSED");

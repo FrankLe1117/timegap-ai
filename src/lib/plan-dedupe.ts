@@ -28,6 +28,7 @@ import {
   AmapPoi,
   buildAmapMarkerUrl,
   buildAmapNavigationUrl,
+  buildAmapSearchUrl,
   buildRouteOptions,
 } from "./amap-client";
 import type { Plan, PlanResponse, RouteHop, TimelineItem } from "@/types";
@@ -99,6 +100,35 @@ export function collectUsedKeys(timeline: TimelineItem[], untilIndex: number): S
 }
 
 /**
+ * Hints used to build an Amap *search* URL when we fall back to manual
+ * confirmation. Always optional — when none/empty, the caller gets the
+ * legacy directional placeholder with no search affordance.
+ */
+export interface MealSearchHints {
+  /** City name passed into the Amap search URL (`city=...`). */
+  city?: string;
+  /** Area or landmark hint, e.g. "人民广场", "黄浦区". Used to build the
+   *  search keyword: "<area> <cuisine|category>". */
+  area?: string;
+  /** Cuisine token like "本帮菜". When absent we fall back to a generic
+   *  "餐厅"/"咖啡馆" depending on activity. */
+  cuisine?: string;
+}
+
+function buildMealSearchKeyword(
+  activity: TimelineItem["activity_type"],
+  hints: MealSearchHints,
+): { keyword: string; baseCategory: string } {
+  const isCoffee = activity === "coffee";
+  const baseCategory = isCoffee ? "咖啡馆" : "餐厅";
+  const cuisine = (hints.cuisine || "").trim();
+  const area = (hints.area || "").trim();
+  const cat = cuisine || baseCategory;
+  const keyword = area ? `${area} ${cat}` : cat;
+  return { keyword, baseCategory };
+}
+
+/**
  * Convert a concrete-POI stop into a directional fallback in place. Strips
  * every field that could let the UI render a map link, marks the place_name
  * with the standard "方向建议，未绑定具体地点" tag, and preserves time / type.
@@ -107,10 +137,15 @@ export function collectUsedKeys(timeline: TimelineItem[], untilIndex: number): S
  * found, the caller can pass `mealManualConfirm: true` to switch to a clearer
  * "需要手动确认餐馆" placeholder rather than the generic "方向建议" one — this
  * makes it obvious to the user that they should pick somewhere themselves.
+ *
+ * When `searchHints` is also supplied, the placeholder is upgraded one more
+ * step: it carries an actionable `search_url` (Amap keyword search, NOT a
+ * verified POI marker) plus `place_kind: "search"`. The UI renders this as
+ * "在高德搜索餐馆" so the user has a real way to confirm a place themselves.
  */
 export function convertStopToDirectional(
   item: TimelineItem,
-  options: { mealManualConfirm?: boolean } = {},
+  options: { mealManualConfirm?: boolean; searchHints?: MealSearchHints } = {},
 ): TimelineItem {
   if (item.activity_type === "transport" || item.activity_type === "station_buffer") {
     return item;
@@ -125,20 +160,44 @@ export function convertStopToDirectional(
     item.activity_type === "dinner" ||
     item.activity_type === "coffee";
   const useManual = !!options.mealManualConfirm && isMeal;
-  const placeName = useManual
-    ? (item.activity_type === "coffee"
-      ? "需要手动确认咖啡馆"
-      : "需要手动确认餐馆")
-    : "方向建议，未绑定具体地点";
-  const reason = useManual
-    ? "未在高德找到符合条件的备选店铺，请手动选择一家"
-    : "已与同行程其他停留点重复，转为方向建议";
+  const hints = options.searchHints;
+  const useSearch =
+    useManual &&
+    !!hints &&
+    !!(hints.area || hints.cuisine || hints.city);
+  let placeName: string;
+  let reason: string;
+  let place_kind: TimelineItem["place_kind"] = "directional";
+  let search_url: string | undefined;
+  let search_query: string | undefined;
+  if (useSearch && hints) {
+    const isCoffee = item.activity_type === "coffee";
+    const noun = isCoffee ? "咖啡馆" : "餐馆";
+    placeName = `需要手动确认${noun}`;
+    const { keyword, baseCategory } = buildMealSearchKeyword(item.activity_type, hints);
+    const isCuisinePrecise = !!hints.cuisine && hints.cuisine !== baseCategory;
+    reason = isCuisinePrecise
+      ? `高德未找到精确${hints.cuisine}，可在高德搜索“${keyword}”查看候选`
+      : `未在高德找到精确候选，可搜索“${keyword}”手动选择一家`;
+    place_kind = "search";
+    search_url = buildAmapSearchUrl(keyword, hints.city || "上海");
+    search_query = keyword;
+  } else if (useManual) {
+    placeName =
+      item.activity_type === "coffee"
+        ? "需要手动确认咖啡馆"
+        : "需要手动确认餐馆";
+    reason = "未在高德找到符合条件的备选店铺，请手动选择一家";
+  } else {
+    placeName = "方向建议，未绑定具体地点";
+    reason = "已与同行程其他停留点重复，转为方向建议";
+  }
   return {
     ...item,
     title: `${label}：${placeName}`,
     place_name: placeName,
     place_id: undefined,
-    place_kind: "directional",
+    place_kind,
     lng: undefined,
     lat: undefined,
     amap_url: undefined,
@@ -146,6 +205,8 @@ export function convertStopToDirectional(
     candidate_reliability: undefined,
     source: "demo",
     reason,
+    search_url,
+    search_query,
   };
 }
 
@@ -292,9 +353,11 @@ function rebuildStopFromPoi(
  *      When found, rewrite the duplicate stop to the new POI and patch the
  *      transport leg that feeds it (title + nav URL + route options) so the
  *      timeline stays coherent.
- *   2. Otherwise (or when the resolver returns null), fall back to the
- *      directional placeholder. Meals get the explicit "需要手动确认餐馆"
- *      placeholder so the user knows we couldn't pick for them.
+ *   2. Otherwise (or when the resolver returns null), fall back to a
+ *      manual-confirm placeholder. When `searchHintsFor` is provided, the
+ *      placeholder carries a real Amap search URL ("在高德搜索餐馆") so the
+ *      user has a way to confirm a place themselves; otherwise it falls
+ *      back to the legacy text-only directional placeholder.
  *
  * Returns the patched plan plus counts split by repair path.
  */
@@ -302,6 +365,7 @@ export async function repairPlanDuplicatesWithAmap(
   plan: Plan,
   resolver?: MealReplacementResolver | null,
   startCoord: AmapCoord | null = null,
+  searchHintsFor?: ((duplicate: TimelineItem) => MealSearchHints | null | undefined) | null,
 ): Promise<{
   plan: Plan;
   replacedCount: number;
@@ -381,7 +445,11 @@ export async function repairPlanDuplicatesWithAmap(
     // generic suggestion.
     const useManual = !!(isMeal && resolver);
     const oldName = it.place_name;
-    const converted = convertStopToDirectional(it, { mealManualConfirm: useManual });
+    const hints = useManual && searchHintsFor ? searchHintsFor(it) : null;
+    const converted = convertStopToDirectional(it, {
+      mealManualConfirm: useManual,
+      searchHints: hints || undefined,
+    });
     convertedIndices.add(newTimelineRaw.length);
     newTimelineRaw.push(converted);
     if (converted.place_name !== oldName) {
@@ -431,17 +499,33 @@ export async function repairPlanDuplicatesWithAmap(
       };
     }
     if (nextIsConverted) {
-      const targetName = newTimelineRaw[i + 1].place_name;
+      const target = newTimelineRaw[i + 1];
+      const targetName = target.place_name;
+      // If the converted stop carries a search URL, surface it on the
+      // transport leg as a single "在高德搜索" affordance so the user can
+      // open the same search from the leg too. Mode "search" keeps the UI
+      // honest — it must NOT be styled like a verified driving/transit route.
+      const isSearch = target.place_kind === "search" && !!target.search_url;
       return {
         ...it,
         title: `前往${targetName}`,
         place_name: targetName,
         place_id: undefined,
-        place_kind: "directional" as const,
+        place_kind: isSearch ? ("search" as const) : ("directional" as const),
         lng: undefined,
         lat: undefined,
         amap_url: undefined,
-        route_options: undefined,
+        search_url: isSearch ? target.search_url : undefined,
+        search_query: isSearch ? target.search_query : undefined,
+        route_options: isSearch
+          ? [
+              {
+                mode: "search" as const,
+                label: "在高德搜索路线",
+                url: target.search_url!,
+              },
+            ]
+          : undefined,
       };
     }
     // Not adjacent to a rewrite. We deliberately do NOT rename by name here
@@ -499,6 +583,7 @@ export async function repairResponseDuplicatesWithAmap(
   response: PlanResponse,
   resolver?: MealReplacementResolver | null,
   startCoord: AmapCoord | null = null,
+  searchHintsFor?: ((duplicate: TimelineItem) => MealSearchHints | null | undefined) | null,
 ): Promise<{
   response: PlanResponse;
   replacedTotal: number;
@@ -509,7 +594,7 @@ export async function repairResponseDuplicatesWithAmap(
   const plans: Plan[] = [];
   for (const p of response.plans) {
     try {
-      const r = await repairPlanDuplicatesWithAmap(p, resolver, startCoord);
+      const r = await repairPlanDuplicatesWithAmap(p, resolver, startCoord, searchHintsFor);
       plans.push(r.plan);
       replacedTotal += r.replacedCount;
       convertedTotal += r.convertedCount;

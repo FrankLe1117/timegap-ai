@@ -396,10 +396,13 @@ export function isPoiReliableForActivity(
   const hasRealId =
     !!poi.hasRealId && !poi.id.startsWith("poi:") && !poi.id.startsWith("geo:");
   if (!hasRealId) return false;
-  if (!poi.address || !poi.address.trim()) return false;
   if (nameLooksSynthetic(poi.name)) return false;
   if (!coordIsValid(poi.coord)) return false;
 
+  // Type/category gating is the primary signal — Amap's place/around endpoint
+  // routinely omits `address` for legitimate restaurants, so we no longer
+  // hard-require it. We DO still require a category match against the
+  // activity bucket so we don't accept a museum POI for a dinner slot.
   const keywords = COMMERCIAL_TYPE_KEYWORDS[activity];
   if (!keywords) return false;
   const t = (poi.type || "").toLowerCase();
@@ -679,16 +682,34 @@ async function resolvePlan(
     }
     if (!poi) {
       // No reliable POI found. For meal/coffee directionals, when Amap is
-      // reachable (we just queried it), upgrade the placeholder to the explicit
-      // "需要手动确认餐馆/咖啡馆" wording so the user knows the tool tried but
-      // couldn't pick — instead of leaving the generic "找一家本帮菜小馆" text.
+      // reachable (we just queried it), upgrade the placeholder to the
+      // actionable "需要手动确认餐馆/咖啡馆" wording AND, when we have any
+      // city/area/cuisine hints to build a search keyword, attach an Amap
+      // search URL so the user has a real way to pick a place themselves.
       const isMeal =
         item.activity_type === "lunch" ||
         item.activity_type === "dinner" ||
         item.activity_type === "coffee";
       if (isMeal) {
         const oldName = item.place_name;
-        const manual = convertStopToDirectional(item, { mealManualConfirm: true });
+        // Prefer a precise cuisine for the search keyword: the directional
+        // intent's category if specific, then any user-supplied hint, then
+        // bare "餐厅"/"咖啡馆".
+        const isCoffee = item.activity_type === "coffee";
+        const baseCategory = isCoffee ? "咖啡馆" : "餐厅";
+        const intentCuisine =
+          intent.category && intent.category !== "餐厅" && intent.category !== baseCategory
+            ? intent.category
+            : "";
+        const cuisine = intentCuisine || cuisineHints[0] || "";
+        const manual = convertStopToDirectional(item, {
+          mealManualConfirm: true,
+          searchHints: {
+            city,
+            area: intent.area,
+            cuisine: cuisine || undefined,
+          },
+        });
         manualRewrites.push({
           stopIndex: newTimeline.length,
           oldName,
@@ -761,18 +782,33 @@ async function resolvePlan(
         });
       } else if (mw) {
         // Transport leg now feeds a manual-confirm placeholder. Strip every
-        // nav affordance so the UI doesn't render a fake "在高德打开" or a
-        // misleading route option pointing at the placeholder string.
+        // verified-POI affordance — but if the placeholder carries an Amap
+        // search URL, surface it as a single search-mode chip on the leg so
+        // the user can open the same search from the transport step too.
+        // Mode "search" keeps the UI honest: it must NOT be styled like a
+        // verified driving/transit route to a concrete place.
+        const target = newTimeline[mw.stopIndex];
+        const isSearch = target?.place_kind === "search" && !!target.search_url;
         patched.push({
           ...it,
           title: `前往${mw.newName}`,
           place_name: mw.newName,
-          place_kind: "directional",
+          place_kind: isSearch ? "search" : "directional",
           place_id: undefined,
           lng: undefined,
           lat: undefined,
           amap_url: undefined,
-          route_options: undefined,
+          search_url: isSearch ? target.search_url : undefined,
+          search_query: isSearch ? target.search_query : undefined,
+          route_options: isSearch
+            ? [
+                {
+                  mode: "search" as const,
+                  label: "在高德搜索路线",
+                  url: target.search_url!,
+                },
+              ]
+            : undefined,
         });
       } else {
         patched.push(it);

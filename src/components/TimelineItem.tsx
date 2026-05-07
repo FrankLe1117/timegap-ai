@@ -47,14 +47,21 @@ const isUnverifiedSyntheticName = (item: TimelineItemType): boolean => {
 const hasNavablePlace = (item: TimelineItemType): boolean => {
   if (["transport", "station_buffer"].includes(item.activity_type)) return false;
   if (!item.place_name) return false;
-  // Directional suggestions never get a map link — they are not POIs.
-  if (item.place_kind === "directional") return false;
+  // Directional / search-confirm placeholders never get a verified-POI map
+  // link — they are not bound to a concrete place. The search-confirm
+  // affordance is rendered separately, see hasSearchAffordance.
+  if (item.place_kind === "directional" || item.place_kind === "search") return false;
   // Belt-and-braces: even if the server forgot to mark a stop as directional,
   // refuse to render a map link for an unverified synthetic-style name.
   if (isUnverifiedSyntheticName(item)) return false;
   // Demo stops without coords and without an amap_url have nothing to point at.
   if (!item.amap_url && !hasTrustedCoords(item)) return false;
   return true;
+};
+
+const hasSearchAffordance = (item: TimelineItemType): boolean => {
+  if (item.activity_type === "transport" || item.activity_type === "station_buffer") return false;
+  return item.place_kind === "search" && !!item.search_url;
 };
 
 const isTransportLeg = (item: TimelineItemType): boolean => item.activity_type === "transport";
@@ -130,7 +137,32 @@ export default function TimelineItem({ item, isLast }: { item: TimelineItemType;
               在高德打开
             </button>
           )}
+          {hasSearchAffordance(item) && (
+            <div className="mt-1.5 flex flex-col gap-0.5" data-export-ignore="true">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (item.search_url) window.open(item.search_url, "_blank");
+                }}
+                title={
+                  item.search_query
+                    ? `在高德搜索“${item.search_query}”，从结果中手动选择一家`
+                    : "在高德搜索，手动选择一家"
+                }
+                className="inline-flex items-center gap-1 text-[11px] text-amber-700 hover:text-amber-900 transition-colors"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+                </svg>
+                {item.activity_type === "coffee" ? "在高德搜索咖啡馆" : "在高德搜索餐馆"}
+              </button>
+              <p className="text-[10px] text-slate-400">
+                方向建议，未绑定具体地点{item.search_query ? `（关键字：${item.search_query}）` : ""}
+              </p>
+            </div>
+          )}
           {!hasNavablePlace(item)
+            && !hasSearchAffordance(item)
             && !["transport", "station_buffer"].includes(item.activity_type)
             && (item.place_kind === "directional" || isUnverifiedSyntheticName(item)) && (
               <p className="mt-1.5 text-[11px] text-slate-400">
