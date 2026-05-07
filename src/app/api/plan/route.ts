@@ -6,8 +6,14 @@ import { buildCandidatePool, isPoolUsable } from "@/lib/candidate-pool";
 import { applyCandidatesToPlans } from "@/lib/planner-replace";
 import { geocodePlace, isAmapConfigured } from "@/lib/amap-client";
 import { sanitizePlanResponse } from "@/lib/place-sanitize";
-import { resolveDirectionalSuggestions } from "@/lib/directional-resolver";
-import { repairResponseDuplicates } from "@/lib/plan-dedupe";
+import {
+  resolveDirectionalSuggestions,
+  resolveMealReplacement,
+} from "@/lib/directional-resolver";
+import {
+  repairResponseDuplicates,
+  repairResponseDuplicatesWithAmap,
+} from "@/lib/plan-dedupe";
 import { Constraints, Plan } from "@/types";
 
 const FIELD_LABELS: Record<string, string> = {
@@ -143,12 +149,42 @@ export async function POST(request: NextRequest) {
     // Final-guard de-duplication. By this point enrichment, candidate
     // replacement, and directional resolution have all run; if any of them
     // — or a combination — left two concrete stops referencing the same
-    // POI in a single plan, this pass converts the later duplicate into a
-    // directional fallback and rewrites the corresponding transport leg so
-    // the user never sees "前往<同一家店>" between identical stops.
+    // POI in a single plan, the duplicate stop is repaired.
+    //
+    // When Amap is reachable, we first try to *replace* a duplicate meal
+    // stop with a different reliable nearby restaurant — so the user never
+    // sees a generic "方向建议" in place of a real restaurant when we could
+    // have picked one. Only when no replacement is found do we convert it
+    // to a clear "需要手动确认餐馆" placeholder (no map link).
+    //
+    // Without Amap we fall back to the synchronous repair pass which always
+    // converts duplicates to a directional placeholder.
     try {
-      const repaired = repairResponseDuplicates(sanitized);
-      sanitized = repaired.response;
+      if (isAmapConfigured()) {
+        const cuisineHints = (sanitized.parsedConstraints.food_preference || []).filter(
+          (s): s is string => typeof s === "string" && s.trim().length > 0,
+        );
+        const city = sanitized.parsedConstraints.city || "上海";
+        const repaired = await repairResponseDuplicatesWithAmap(
+          sanitized,
+          async ({ duplicate, anchor, usedKeys }) => {
+            return resolveMealReplacement({
+              activity: duplicate.activity_type,
+              anchor,
+              area: undefined,
+              category: undefined,
+              city,
+              cuisineHints,
+              usedKeys,
+            });
+          },
+          startCoord,
+        );
+        sanitized = repaired.response;
+      } else {
+        const repaired = repairResponseDuplicates(sanitized);
+        sanitized = repaired.response;
+      }
     } catch (err) {
       console.warn("[plan] Duplicate-repair guard failed, keeping response:", err);
     }

@@ -22,15 +22,20 @@
  */
 import {
   buildIntentQueries,
+  buildMealFallbackQueries,
   extractDirectionalIntent,
   isPoiReliableForActivity,
+  resolveDirectionalStop,
   resolveDirectionalSuggestions,
+  resolveMealReplacement,
   type AmapSearchDeps,
 } from "../src/lib/directional-resolver";
 import type { AmapPoi } from "../src/lib/amap-client";
 import {
   repairPlanDuplicates,
+  repairPlanDuplicatesWithAmap,
   repairResponseDuplicates,
+  repairResponseDuplicatesWithAmap,
   stopKey,
 } from "../src/lib/plan-dedupe";
 import type { Plan, PlanResponse, TimelineItem } from "../src/types";
@@ -678,6 +683,522 @@ const onlyConfirmedPoi: AmapPoi = {
   const { response, convertedTotal } = repairResponseDuplicates(resp);
   ok(convertedTotal === 0, "repair-response: no-op when no duplicates");
   ok(response === resp, "repair-response: identity preserved on no-op");
+}
+
+/* ------------------------------------------------------------------------- */
+/* 5. Restaurant fallback search                                              */
+/* ------------------------------------------------------------------------- */
+
+// 5a. buildMealFallbackQueries widens the search beyond the intent category.
+{
+  const lunchIntent = {
+    area: "人民广场",
+    category: "餐厅" as string,
+    activity: "lunch" as TimelineItem["activity_type"],
+  };
+  const queries = buildMealFallbackQueries(lunchIntent, ["本帮菜"]);
+  ok(queries.length >= 3, `meal-fallback: at least 3 queries (got ${queries.length})`);
+  ok(
+    queries.some((q) => q.includes("本帮菜")),
+    "meal-fallback: includes 本帮菜 cuisine hint",
+  );
+  ok(
+    queries.some((q) => q.includes("人民广场")),
+    "meal-fallback: includes area in queries",
+  );
+  // Coffee branch uses cafe-specific tokens.
+  const coffeeIntent = {
+    area: "武康路",
+    category: "咖啡",
+    activity: "coffee" as TimelineItem["activity_type"],
+  };
+  const coffeeQueries = buildMealFallbackQueries(coffeeIntent, []);
+  ok(
+    coffeeQueries.some((q) => q.includes("咖啡")),
+    "meal-fallback: coffee branch keeps coffee tokens",
+  );
+}
+
+// 5b. Pass-2 fallback fires when pass-1 returns nothing reliable. Simulate
+//     by returning weak POIs for the intent queries and a real one for the
+//     fallback queries.
+{
+  const realLunchPoi: AmapPoi = {
+    id: "B0FFGRX001",
+    name: "上海德兴馆(广东路店)",
+    address: "黄浦区广东路471号",
+    coord: { lng: 121.481, lat: 31.234 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  let calls = 0;
+  const deps: AmapSearchDeps = {
+    // Pass-1 uses radius<=2500 / limit<=5; pass-2 uses radius=4000 / limit=10.
+    // Returning POIs only on the wider-radius call proves we're hitting the
+    // fallback path (not just a different intent query).
+    searchByKeyword: async (_q, _city, limit) => {
+      calls += 1;
+      return (limit && limit >= 10) ? [realLunchPoi] : [];
+    },
+    searchNearby: async (_anchor, _q, radius, limit) => {
+      calls += 1;
+      return (radius && radius >= 4000) || (limit && limit >= 10)
+        ? [realLunchPoi]
+        : [];
+    },
+  };
+  const intent = {
+    area: "人民广场",
+    category: "餐厅",
+    activity: "lunch" as TimelineItem["activity_type"],
+  };
+  const pick = await resolveDirectionalStop(
+    intent,
+    { lng: 121.48, lat: 31.23 },
+    "上海",
+    deps,
+    new Set<string>(),
+    { cuisineHints: ["本帮菜"] },
+  );
+  ok(pick !== null, "meal-fallback: pass-2 finds a real POI when pass-1 returns nothing");
+  ok(pick && pick.name === realLunchPoi.name, `meal-fallback: picked real POI (got ${pick && pick.name})`);
+  ok(calls >= 2, `meal-fallback: at least two search rounds (got ${calls})`);
+}
+
+/* ------------------------------------------------------------------------- */
+/* 6. Amap-aware duplicate repair                                             */
+/* ------------------------------------------------------------------------- */
+
+// 6a. Duplicate restaurant gets *replaced* with a different concrete POI when
+//     a resolver returns one (instead of being converted to directional).
+{
+  const sharedPoi: AmapPoi = {
+    id: "B0FFGRX001",
+    name: "上海老饭店",
+    address: "黄浦区福佑路242号",
+    coord: { lng: 121.493, lat: 31.227 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  const altPoi: AmapPoi = {
+    id: "B0FFGRX002",
+    name: "绿波廊",
+    address: "黄浦区豫园路115号",
+    coord: { lng: 121.492, lat: 31.226 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  const lunchStop: TimelineItem = {
+    start_time: "12:00",
+    end_time: "13:00",
+    title: `午餐：${sharedPoi.name}`,
+    place_name: sharedPoi.name,
+    place_id: sharedPoi.id,
+    activity_type: "lunch",
+    reason: "高德验证",
+    estimated_travel_time_to_next_min: null,
+    lng: sharedPoi.coord.lng,
+    lat: sharedPoi.coord.lat,
+    amap_url: "https://uri.amap.com/marker?dummy",
+    source: "amap",
+    candidate_reliability: "confirmed",
+    place_kind: "poi",
+  };
+  const dinnerStop: TimelineItem = { ...lunchStop, start_time: "18:30", end_time: "19:30", title: `晚餐：${sharedPoi.name}`, activity_type: "dinner" };
+  const transport1: TimelineItem = {
+    start_time: "11:30",
+    end_time: "12:00",
+    title: `前往${sharedPoi.name}`,
+    place_name: sharedPoi.name,
+    activity_type: "transport",
+    reason: "驾车/打车",
+    estimated_travel_time_to_next_min: null,
+    travel_mode: "驾车/打车",
+  };
+  const transport2: TimelineItem = { ...transport1, start_time: "18:00", end_time: "18:30" };
+  const dupPlan: Plan = {
+    plan_name: "重复方案",
+    plan_type: "balanced",
+    one_sentence_summary: "",
+    tradeoff_summary: "",
+    suitability_tags: {
+      time_safety: "High", rush_hour_exposure: "Low", walking_intensity: "Low",
+      local_experience: "High", luggage_friendly: "High", weather_robustness: "High",
+      station_arrival_confidence: 80, experience_score: 70,
+    },
+    timeline: [transport1, lunchStop, transport2, dinnerStop],
+    route_chain: [
+      { from: "起点", to: sharedPoi.name, travel_min: 30, kind: "leg" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 0, kind: "stop", stop_duration_min: 60, activity_type: "lunch" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 30, kind: "leg" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 0, kind: "stop", stop_duration_min: 60, activity_type: "dinner" },
+    ],
+    latest_leave_for_station: "21:00",
+    risk_note: "",
+    backup_suggestion: "",
+    explanation: "",
+  };
+  const { plan: repaired, replacedCount, convertedCount } = await repairPlanDuplicatesWithAmap(
+    dupPlan,
+    async () => altPoi,
+    { lng: 121.49, lat: 31.23 },
+  );
+  ok(replacedCount === 1, `amap-repair: replaced exactly one duplicate (got ${replacedCount})`);
+  ok(convertedCount === 0, `amap-repair: nothing converted to directional (got ${convertedCount})`);
+  const stops = repaired.timeline.filter(
+    (t) => t.activity_type !== "transport" && t.activity_type !== "station_buffer",
+  );
+  ok(stops.length === 2, "amap-repair: still two stops");
+  ok(stops[0].place_name === sharedPoi.name, "amap-repair: first stop kept");
+  ok(stops[1].place_name === altPoi.name, `amap-repair: dup stop replaced with alt POI (got ${stops[1].place_name})`);
+  ok(stops[1].place_kind === "poi", "amap-repair: replaced stop is a poi");
+  ok(!!stops[1].amap_url, "amap-repair: replaced stop has amap_url");
+  ok(stops[1].lng === altPoi.coord.lng && stops[1].lat === altPoi.coord.lat, "amap-repair: replaced stop has alt coords");
+  ok(stops[1].source === "amap", "amap-repair: replaced stop source=amap");
+  // Transport leg titles updated coherently.
+  const transports = repaired.timeline.filter((t) => t.activity_type === "transport");
+  const lastTransport = transports[transports.length - 1];
+  ok(lastTransport.place_name === altPoi.name, `amap-repair: transport leg name updated (got ${lastTransport.place_name})`);
+  ok(lastTransport.title === `前往${altPoi.name}`, `amap-repair: transport leg title updated (got ${lastTransport.title})`);
+  ok(lastTransport.place_kind === "poi", "amap-repair: transport leg place_kind=poi");
+  ok(!!lastTransport.amap_url, "amap-repair: transport leg has amap_url");
+  // No self-loop: transport from to differs.
+  ok(transports[0].place_name !== transports[1].place_name, "amap-repair: no identical adjacent transport titles for both meals");
+}
+
+// 6b. When resolver returns null, duplicate falls back to the explicit
+//     "需要手动确认餐馆" placeholder (not a fake suggestion, no map link).
+{
+  const sharedPoi: AmapPoi = {
+    id: "B0FFGRX001",
+    name: "上海老饭店",
+    address: "黄浦区福佑路242号",
+    coord: { lng: 121.493, lat: 31.227 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  const lunchStop: TimelineItem = {
+    start_time: "12:00",
+    end_time: "13:00",
+    title: `午餐：${sharedPoi.name}`,
+    place_name: sharedPoi.name,
+    place_id: sharedPoi.id,
+    activity_type: "lunch",
+    reason: "高德验证",
+    estimated_travel_time_to_next_min: null,
+    lng: sharedPoi.coord.lng,
+    lat: sharedPoi.coord.lat,
+    amap_url: "https://uri.amap.com/marker?dummy",
+    source: "amap",
+    candidate_reliability: "confirmed",
+    place_kind: "poi",
+  };
+  const dinnerStop: TimelineItem = { ...lunchStop, start_time: "18:30", end_time: "19:30", title: `晚餐：${sharedPoi.name}`, activity_type: "dinner" };
+  const transport1: TimelineItem = {
+    start_time: "11:30",
+    end_time: "12:00",
+    title: `前往${sharedPoi.name}`,
+    place_name: sharedPoi.name,
+    activity_type: "transport",
+    reason: "驾车/打车",
+    estimated_travel_time_to_next_min: null,
+    travel_mode: "驾车/打车",
+  };
+  const transport2: TimelineItem = { ...transport1, start_time: "18:00", end_time: "18:30" };
+  const dupPlan: Plan = {
+    plan_name: "重复方案",
+    plan_type: "balanced",
+    one_sentence_summary: "",
+    tradeoff_summary: "",
+    suitability_tags: {
+      time_safety: "High", rush_hour_exposure: "Low", walking_intensity: "Low",
+      local_experience: "High", luggage_friendly: "High", weather_robustness: "High",
+      station_arrival_confidence: 80, experience_score: 70,
+    },
+    timeline: [transport1, lunchStop, transport2, dinnerStop],
+    route_chain: [
+      { from: "起点", to: sharedPoi.name, travel_min: 30, kind: "leg" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 0, kind: "stop", stop_duration_min: 60, activity_type: "lunch" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 30, kind: "leg" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 0, kind: "stop", stop_duration_min: 60, activity_type: "dinner" },
+    ],
+    latest_leave_for_station: "21:00",
+    risk_note: "",
+    backup_suggestion: "",
+    explanation: "",
+  };
+  const { plan: repaired, replacedCount, convertedCount } = await repairPlanDuplicatesWithAmap(
+    dupPlan,
+    async () => null,
+    { lng: 121.49, lat: 31.23 },
+  );
+  ok(replacedCount === 0, `manual-fallback: nothing replaced (got ${replacedCount})`);
+  ok(convertedCount === 1, `manual-fallback: one converted to manual placeholder (got ${convertedCount})`);
+  const stops = repaired.timeline.filter(
+    (t) => t.activity_type !== "transport" && t.activity_type !== "station_buffer",
+  );
+  ok(stops[0].place_name === sharedPoi.name, "manual-fallback: first stop kept");
+  ok(stops[1].place_kind === "directional", "manual-fallback: dup converted to directional");
+  ok(/手动确认餐馆/.test(stops[1].place_name), `manual-fallback: place_name uses manual-confirm copy (got ${stops[1].place_name})`);
+  ok(!/方向建议/.test(stops[1].place_name), `manual-fallback: place_name does NOT use generic directional copy (got ${stops[1].place_name})`);
+  ok(!stops[1].amap_url, "manual-fallback: no amap_url on placeholder");
+  ok(stops[1].lng == null && stops[1].lat == null, "manual-fallback: no coords on placeholder");
+  ok(/手动选择|未在高德/.test(stops[1].reason || ""), `manual-fallback: reason explains why (got ${stops[1].reason})`);
+  // Transport leg fed into the dup must not still title "前往<同一家店>".
+  const transports = repaired.timeline.filter((t) => t.activity_type === "transport");
+  const lastTransport = transports[transports.length - 1];
+  ok(lastTransport.place_name !== sharedPoi.name, "manual-fallback: trailing transport name updated");
+  ok(!lastTransport.amap_url, "manual-fallback: trailing transport amap_url stripped");
+  ok(lastTransport.place_kind === "directional", "manual-fallback: trailing transport place_kind=directional");
+}
+
+// 6c. Coffee duplicate also routes through the meal/coffee branch (uses
+//     manual-confirm copy when no resolver result).
+{
+  const cafePoi: AmapPoi = {
+    id: "B0FFGRX003",
+    name: "%Arabica 武康路店",
+    address: "武康路378号",
+    coord: { lng: 121.42, lat: 31.20 },
+    type: "餐饮服务;咖啡厅;咖啡厅",
+    district: "徐汇区",
+    hasRealId: true,
+  };
+  const coffeeStop1: TimelineItem = {
+    start_time: "10:00",
+    end_time: "10:30",
+    title: `咖啡休息：${cafePoi.name}`,
+    place_name: cafePoi.name,
+    place_id: cafePoi.id,
+    activity_type: "coffee",
+    reason: "高德验证",
+    estimated_travel_time_to_next_min: null,
+    lng: cafePoi.coord.lng,
+    lat: cafePoi.coord.lat,
+    amap_url: "https://uri.amap.com/marker?dummy",
+    source: "amap",
+    candidate_reliability: "confirmed",
+    place_kind: "poi",
+  };
+  const coffeeStop2: TimelineItem = { ...coffeeStop1, start_time: "15:00", end_time: "15:30" };
+  const transport1: TimelineItem = {
+    start_time: "09:30", end_time: "10:00",
+    title: `前往${cafePoi.name}`, place_name: cafePoi.name,
+    activity_type: "transport", reason: "驾车/打车",
+    estimated_travel_time_to_next_min: null, travel_mode: "驾车/打车",
+  };
+  const transport2: TimelineItem = { ...transport1, start_time: "14:30", end_time: "15:00" };
+  const dupPlan: Plan = {
+    plan_name: "重复方案", plan_type: "balanced",
+    one_sentence_summary: "", tradeoff_summary: "",
+    suitability_tags: {
+      time_safety: "High", rush_hour_exposure: "Low", walking_intensity: "Low",
+      local_experience: "High", luggage_friendly: "High", weather_robustness: "High",
+      station_arrival_confidence: 80, experience_score: 70,
+    },
+    timeline: [transport1, coffeeStop1, transport2, coffeeStop2],
+    route_chain: [
+      { from: "起点", to: cafePoi.name, travel_min: 15, kind: "leg" },
+      { from: cafePoi.name, to: cafePoi.name, travel_min: 0, kind: "stop", stop_duration_min: 30, activity_type: "coffee" },
+      { from: cafePoi.name, to: cafePoi.name, travel_min: 30, kind: "leg" },
+      { from: cafePoi.name, to: cafePoi.name, travel_min: 0, kind: "stop", stop_duration_min: 30, activity_type: "coffee" },
+    ],
+    latest_leave_for_station: "21:00", risk_note: "", backup_suggestion: "", explanation: "",
+  };
+  const { plan: repaired } = await repairPlanDuplicatesWithAmap(
+    dupPlan,
+    async () => null,
+    null,
+  );
+  const stops = repaired.timeline.filter(
+    (t) => t.activity_type !== "transport" && t.activity_type !== "station_buffer",
+  );
+  ok(/手动确认咖啡馆/.test(stops[1].place_name), `coffee-manual: uses cafe-specific manual copy (got ${stops[1].place_name})`);
+}
+
+// 6d. Without a resolver, repairPlanDuplicatesWithAmap behaves like the sync
+//     repair (every duplicate becomes a generic directional placeholder).
+{
+  const sharedPoi: AmapPoi = {
+    id: "B0FFGRX001",
+    name: "上海老饭店",
+    address: "黄浦区福佑路242号",
+    coord: { lng: 121.493, lat: 31.227 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  const lunch: TimelineItem = {
+    start_time: "12:00", end_time: "13:00",
+    title: `午餐：${sharedPoi.name}`, place_name: sharedPoi.name,
+    place_id: sharedPoi.id, activity_type: "lunch",
+    reason: "高德验证", estimated_travel_time_to_next_min: null,
+    lng: sharedPoi.coord.lng, lat: sharedPoi.coord.lat,
+    amap_url: "https://uri.amap.com/marker?dummy",
+    source: "amap", candidate_reliability: "confirmed", place_kind: "poi",
+  };
+  const dinner: TimelineItem = { ...lunch, start_time: "18:30", end_time: "19:30", activity_type: "dinner", title: `晚餐：${sharedPoi.name}` };
+  const tx1: TimelineItem = {
+    start_time: "11:30", end_time: "12:00",
+    title: `前往${sharedPoi.name}`, place_name: sharedPoi.name,
+    activity_type: "transport", reason: "驾车", estimated_travel_time_to_next_min: null,
+    travel_mode: "驾车/打车",
+  };
+  const tx2: TimelineItem = { ...tx1, start_time: "18:00", end_time: "18:30" };
+  const plan: Plan = {
+    plan_name: "p", plan_type: "balanced", one_sentence_summary: "", tradeoff_summary: "",
+    suitability_tags: {
+      time_safety: "High", rush_hour_exposure: "Low", walking_intensity: "Low",
+      local_experience: "High", luggage_friendly: "High", weather_robustness: "High",
+      station_arrival_confidence: 80, experience_score: 70,
+    },
+    timeline: [tx1, lunch, tx2, dinner],
+    route_chain: [
+      { from: "起点", to: sharedPoi.name, travel_min: 30, kind: "leg" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 0, kind: "stop", stop_duration_min: 60, activity_type: "lunch" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 30, kind: "leg" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 0, kind: "stop", stop_duration_min: 60, activity_type: "dinner" },
+    ],
+    latest_leave_for_station: "21:00", risk_note: "", backup_suggestion: "", explanation: "",
+  };
+  const { plan: repaired, replacedCount, convertedCount } = await repairPlanDuplicatesWithAmap(plan, null, null);
+  ok(replacedCount === 0, "no-resolver: nothing replaced");
+  ok(convertedCount === 1, "no-resolver: one converted to directional");
+  const stops = repaired.timeline.filter((t) => t.activity_type !== "transport" && t.activity_type !== "station_buffer");
+  ok(/方向建议/.test(stops[1].place_name) && !/手动确认/.test(stops[1].place_name), `no-resolver: uses generic directional copy (got ${stops[1].place_name})`);
+}
+
+// 6e. resolveMealReplacement is a thin wrapper that respects usedKeys.
+{
+  const realPoi: AmapPoi = {
+    id: "B0FFXXX",
+    name: "Manner Coffee(南京东路店)",
+    address: "南京东路200号",
+    coord: { lng: 121.49, lat: 31.24 },
+    type: "餐饮服务;咖啡厅;咖啡厅",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  const deps: AmapSearchDeps = {
+    searchByKeyword: async () => [realPoi],
+    searchNearby: async () => [realPoi],
+  };
+  const used = new Set<string>([`id:${realPoi.id}`]);
+  const skip = await resolveMealReplacement({
+    activity: "coffee",
+    anchor: { lng: 121.49, lat: 31.24 },
+    usedKeys: used,
+    deps,
+  });
+  ok(skip === null, "resolveMealReplacement: skips POI already in usedKeys");
+  const used2 = new Set<string>();
+  const pick = await resolveMealReplacement({
+    activity: "coffee",
+    anchor: { lng: 121.49, lat: 31.24 },
+    usedKeys: used2,
+    deps,
+  });
+  ok(pick && pick.id === realPoi.id, "resolveMealReplacement: picks real POI when free");
+}
+
+// 6f. End-to-end response-level repair: duplicate restaurant in a sanitized
+//     PlanResponse gets replaced with a different concrete POI, and the
+//     dataSources.candidatesUsed flag flips on.
+{
+  const sharedPoi: AmapPoi = {
+    id: "B0FFGRX001",
+    name: "上海老饭店",
+    address: "黄浦区福佑路242号",
+    coord: { lng: 121.493, lat: 31.227 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  const altPoi: AmapPoi = {
+    id: "B0FFGRX002",
+    name: "绿波廊",
+    address: "黄浦区豫园路115号",
+    coord: { lng: 121.491, lat: 31.226 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  const lunch: TimelineItem = {
+    start_time: "12:00", end_time: "13:00",
+    title: `午餐：${sharedPoi.name}`, place_name: sharedPoi.name,
+    place_id: sharedPoi.id, activity_type: "lunch",
+    reason: "高德验证", estimated_travel_time_to_next_min: null,
+    lng: sharedPoi.coord.lng, lat: sharedPoi.coord.lat,
+    amap_url: "https://uri.amap.com/marker?dummy",
+    source: "amap", candidate_reliability: "confirmed", place_kind: "poi",
+  };
+  const dinner: TimelineItem = { ...lunch, start_time: "18:30", end_time: "19:30", title: `晚餐：${sharedPoi.name}`, activity_type: "dinner" };
+  const tx1: TimelineItem = {
+    start_time: "11:30", end_time: "12:00",
+    title: `前往${sharedPoi.name}`, place_name: sharedPoi.name,
+    activity_type: "transport", reason: "驾车", estimated_travel_time_to_next_min: null,
+    travel_mode: "驾车/打车",
+  };
+  const tx2: TimelineItem = { ...tx1, start_time: "18:00", end_time: "18:30" };
+  const plan: Plan = {
+    plan_name: "p", plan_type: "balanced", one_sentence_summary: "", tradeoff_summary: "",
+    suitability_tags: {
+      time_safety: "High", rush_hour_exposure: "Low", walking_intensity: "Low",
+      local_experience: "High", luggage_friendly: "High", weather_robustness: "High",
+      station_arrival_confidence: 80, experience_score: 70,
+    },
+    timeline: [tx1, lunch, tx2, dinner],
+    route_chain: [
+      { from: "起点", to: sharedPoi.name, travel_min: 30, kind: "leg" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 0, kind: "stop", stop_duration_min: 60, activity_type: "lunch" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 30, kind: "leg" },
+      { from: sharedPoi.name, to: sharedPoi.name, travel_min: 0, kind: "stop", stop_duration_min: 60, activity_type: "dinner" },
+    ],
+    latest_leave_for_station: "21:00", risk_note: "", backup_suggestion: "", explanation: "",
+  };
+  const resp: PlanResponse = {
+    parsedConstraints: {
+      city: "上海", start_location: "外滩", start_time: "11:00",
+      final_destination: "虹桥火车站", departure_time: "21:00",
+      preferences: ["local_food"], constraints: [], budget_per_person: null,
+      luggage: false, weather: "unknown", walking_preference: "medium",
+      food_preference: ["本帮菜"], plan_style: "balanced",
+    },
+    timeBudget: {
+      free_window_min: 600, station_buffer_min: 45,
+      planning_deadline: "20:00", estimated_final_transfer_min: 30,
+      latest_leave_for_station: "20:00", safe_activity_time_min: 540,
+      rush_hour_detected: false, rush_hour_note: "",
+    },
+    plans: [plan],
+    dataSources: {
+      places: "高德", travelTimes: "高德",
+      apiReady: "高德 web service", routesSource: "amap", amapConfigured: true,
+    },
+  };
+  const { response, replacedTotal, convertedTotal } = await repairResponseDuplicatesWithAmap(
+    resp,
+    async ({ usedKeys }) => {
+      // Honor usedKeys: skip sharedPoi if it's already in.
+      if (usedKeys.has(`id:${altPoi.id}`)) return null;
+      return altPoi;
+    },
+    { lng: 121.49, lat: 31.23 },
+  );
+  ok(replacedTotal === 1, `e2e-repair: replacedTotal=1 (got ${replacedTotal})`);
+  ok(convertedTotal === 0, `e2e-repair: convertedTotal=0 (got ${convertedTotal})`);
+  const stops = response.plans[0].timeline.filter(
+    (t) => t.activity_type !== "transport" && t.activity_type !== "station_buffer",
+  );
+  ok(stops[0].place_name === sharedPoi.name, "e2e-repair: lunch kept original");
+  ok(stops[1].place_name === altPoi.name, "e2e-repair: dinner replaced with alt POI");
+  ok(stops[1].place_kind === "poi", "e2e-repair: dinner stop is poi");
+  ok((response.dataSources.candidateSources || []).includes("amap"), "e2e-repair: candidateSources includes amap");
+  ok(response.dataSources.candidatesUsed === true, "e2e-repair: candidatesUsed=true");
 }
 
 console.log("\nALL DIRECTIONAL-RESOLVER SMOKE ASSERTIONS PASSED");

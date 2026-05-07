@@ -186,6 +186,51 @@ export function buildIntentQueries(intent: DirectionalIntent): string[] {
 }
 
 /**
+ * Build a broader set of meal-specific Amap queries used as a fallback when
+ * the intent-derived queries return nothing reliable. These widen the search
+ * along two axes:
+ *   - Use the user's food preferences / additional cuisines (本帮菜, 茶餐厅, …)
+ *     even when the directional name didn't carry that category token.
+ *   - Use generic restaurant tokens (餐厅, 小馆) on top of any area we have.
+ *
+ * Caller passes additional cuisine hints (e.g. parsed from constraints or
+ * timeline tags). Always returns at least one query.
+ */
+export function buildMealFallbackQueries(
+  intent: DirectionalIntent,
+  cuisineHints: string[] = [],
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (q: string) => {
+    const t = q.trim().replace(/\s+/g, " ");
+    if (t && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  };
+  const a = intent.area || "";
+
+  // Cuisine-specific queries. Try with area first, then bare.
+  const cuisines = Array.from(new Set([intent.category, ...cuisineHints]))
+    .filter((c) => c && c !== "餐厅");
+  for (const c of cuisines) {
+    if (a) push(`${a} ${c}`);
+    push(c);
+  }
+  // Generic restaurant queries (broadest), with area first.
+  const generic =
+    intent.activity === "coffee"
+      ? ["咖啡馆", "咖啡厅", "咖啡"]
+      : ["本帮菜", "上海菜", "中餐厅", "餐厅", "小馆"];
+  for (const g of generic) {
+    if (a) push(`${a} ${g}`);
+    push(g);
+  }
+  return out.slice(0, 6);
+}
+
+/**
  * Reliability gate, mirroring `candidate-pool.classifyReliability` for the
  * commercial categories that directional suggestions cover.
  *
@@ -287,9 +332,11 @@ export async function resolveDirectionalStop(
   city = "上海",
   deps: AmapSearchDeps = DEFAULT_DEPS,
   usedKeys?: Set<string>,
+  options: { cuisineHints?: string[] } = {},
 ): Promise<AmapPoi | null> {
   const queries = buildIntentQueries(intent);
 
+  // Pass 1: intent-derived queries with the standard 2.5 km radius.
   for (const q of queries) {
     let pois: AmapPoi[] = [];
     if (anchor) {
@@ -301,7 +348,72 @@ export async function resolveDirectionalStop(
     const pick = pickReliable(pois, intent.activity, anchor, usedKeys);
     if (pick) return pick;
   }
+
+  // Pass 2: meal/coffee-specific fallback. Widen radius and try cuisine
+  // synonyms + generic restaurant tokens. This is what catches the common
+  // "lunch directional with no specific cuisine in the name" case so we don't
+  // leave the user with a generic 方向建议.
+  const isMeal =
+    intent.activity === "lunch" ||
+    intent.activity === "dinner" ||
+    intent.activity === "coffee";
+  if (!isMeal) return null;
+
+  const fallbackQueries = buildMealFallbackQueries(intent, options.cuisineHints || []);
+  for (const q of fallbackQueries) {
+    let pois: AmapPoi[] = [];
+    if (anchor) {
+      // Wider radius (4 km) and a slightly larger result set so the gate has
+      // more candidates to filter against.
+      pois = await deps.searchNearby(anchor, q, 4000, 10);
+    }
+    if (!pois.length) {
+      pois = await deps.searchByKeyword(q, city, 10);
+    }
+    const pick = pickReliable(pois, intent.activity, anchor, usedKeys);
+    if (pick) return pick;
+  }
   return null;
+}
+
+/**
+ * Find a replacement restaurant/cafe POI for a meal stop given an anchor
+ * coordinate, the activity bucket, and a set of dedupe keys to avoid.
+ *
+ * This is the entry point used by the duplicate-repair pass: when a plan ends
+ * up with two stops at the same POI, it asks Amap for a different but still
+ * reliable nearby restaurant before falling back to a directional placeholder.
+ *
+ * Reuses the same intent-derived + meal-fallback query ladder as
+ * `resolveDirectionalStop`, plus the same reliability gate, so the result —
+ * if any — is guaranteed to be navigable AND distinct from the existing
+ * concrete stops.
+ */
+export async function resolveMealReplacement(args: {
+  activity: TimelineItem["activity_type"];
+  anchor: AmapCoord | null;
+  area?: string;
+  category?: string;
+  city?: string;
+  cuisineHints?: string[];
+  usedKeys: Set<string>;
+  deps?: AmapSearchDeps;
+}): Promise<AmapPoi | null> {
+  const intent: DirectionalIntent = {
+    area: args.area,
+    category:
+      args.category || (args.activity === "coffee" ? "咖啡" : "餐厅"),
+    activity: args.activity,
+  };
+  const deps = args.deps || DEFAULT_DEPS;
+  return resolveDirectionalStop(
+    intent,
+    args.anchor,
+    args.city || "上海",
+    deps,
+    args.usedKeys,
+    { cuisineHints: args.cuisineHints || [] },
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -366,6 +478,7 @@ async function resolvePlan(
   startCoord: AmapCoord | null,
   city: string,
   deps: AmapSearchDeps,
+  cuisineHints: string[] = [],
 ): Promise<{ plan: Plan; resolvedCount: number }> {
   const rewrites: ResolutionRewrite[] = [];
   const newTimeline: TimelineItem[] = [];
@@ -392,7 +505,9 @@ async function resolvePlan(
     const intent = extractDirectionalIntent(item);
     let poi: AmapPoi | null = null;
     try {
-      poi = await resolveDirectionalStop(intent, anchor, city, deps, usedKeys);
+      poi = await resolveDirectionalStop(intent, anchor, city, deps, usedKeys, {
+        cuisineHints,
+      });
     } catch (err) {
       console.warn("[directional-resolver] resolve failed for", item.place_name, err);
       poi = null;
@@ -497,6 +612,10 @@ export interface DirectionalResolveOptions {
   city?: string;
   /** Injected Amap helpers, for tests. Defaults to the live client. */
   deps?: AmapSearchDeps;
+  /** Extra cuisine/food hints (e.g. parsed `food_preference`). Used to widen
+   *  the meal fallback search beyond the category extracted from the
+   *  directional name. */
+  cuisineHints?: string[];
 }
 
 export interface DirectionalResolveResult {
@@ -531,12 +650,18 @@ export async function resolveDirectionalSuggestions(
 
   const city = opts.city || response.parsedConstraints.city || "上海";
   const startCoord = opts.startCoord ?? null;
+  const cuisineHints = Array.from(
+    new Set([
+      ...(opts.cuisineHints || []),
+      ...((response.parsedConstraints.food_preference || []) as string[]),
+    ]),
+  ).filter((s) => typeof s === "string" && s.trim().length > 0);
 
   let resolvedTotal = 0;
   const newPlans: Plan[] = [];
   for (const plan of response.plans) {
     try {
-      const r = await resolvePlan(plan, startCoord, city, deps);
+      const r = await resolvePlan(plan, startCoord, city, deps, cuisineHints);
       newPlans.push(r.plan);
       resolvedTotal += r.resolvedCount;
     } catch (err) {
