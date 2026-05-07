@@ -114,12 +114,40 @@ const CATEGORY_PATTERNS: Array<{ re: RegExp; category: string }> = [
   { re: /老字号/, category: "老字号餐厅" },
   { re: /本帮|上海菜/, category: "本帮菜" },
   { re: /法式|法餐/, category: "法餐" },
-  { re: /日料/, category: "日料" },
+  { re: /日料|日本料理/, category: "日料" },
+  { re: /茶餐厅|港式/, category: "茶餐厅" },
   { re: /咖啡/, category: "咖啡" },
   { re: /茶馆?/, category: "茶馆" },
   { re: /小吃|快餐|简餐/, category: "本地小吃" },
   { re: /餐厅|小馆|餐馆|饭馆|食堂|酒楼|小酒馆|酒馆/, category: "餐厅" },
 ];
+
+/**
+ * Generalization ladder for cuisine categories. Each key maps to broader
+ * synonyms ordered by specificity. Used by the cascade to widen searches when
+ * a precise cuisine returns nothing reliable — e.g. 本帮菜 → 上海菜 → 江浙菜
+ * → 中餐. Empty array means "no further generalization beyond the bare
+ * category".
+ */
+const CUISINE_GENERALIZATION: Record<string, string[]> = {
+  本帮菜: ["上海菜", "江浙菜", "中餐"],
+  老字号餐厅: ["中餐", "本帮菜", "上海菜"],
+  法餐: ["西餐", "法国菜"],
+  日料: ["日本料理", "亚洲菜"],
+  茶餐厅: ["粤菜", "港式茶餐厅", "中餐"],
+  茶馆: ["茶艺馆", "茶饮"],
+  咖啡: ["咖啡馆", "咖啡厅"],
+  本地小吃: ["小吃", "快餐", "简餐"],
+  餐厅: ["美食"],
+};
+
+/** Generic terminal categories per activity. The cascade falls back to these
+ *  when even the generalized cuisine returns nothing usable. */
+const GENERIC_CATEGORIES: Record<string, string[]> = {
+  lunch: ["餐厅", "美食", "中餐厅", "小馆"],
+  dinner: ["餐厅", "美食", "中餐厅", "小馆"],
+  coffee: ["咖啡馆", "咖啡厅", "饮品", "茶饮"],
+};
 
 /**
  * Extract `{area, category, activity}` from a directional TimelineItem. The
@@ -195,39 +223,125 @@ export function buildIntentQueries(intent: DirectionalIntent): string[] {
  *
  * Caller passes additional cuisine hints (e.g. parsed from constraints or
  * timeline tags). Always returns at least one query.
+ *
+ * Returned order is the flat union of all cascade levels (level 1 first, then
+ * level 2, …), de-duped. Used as a single-pass fallback in older callers and
+ * by the cascade itself for level-2 wide search.
  */
 export function buildMealFallbackQueries(
   intent: DirectionalIntent,
   cuisineHints: string[] = [],
 ): string[] {
+  const levels = buildMealCascadeLevels(intent, cuisineHints);
   const out: string[] = [];
   const seen = new Set<string>();
-  const push = (q: string) => {
-    const t = q.trim().replace(/\s+/g, " ");
-    if (t && !seen.has(t)) {
-      seen.add(t);
-      out.push(t);
+  for (const lvl of levels) {
+    for (const q of lvl) {
+      if (!seen.has(q)) {
+        seen.add(q);
+        out.push(q);
+      }
     }
-  };
-  const a = intent.area || "";
+  }
+  // Cap to keep network volume bounded; the cascade itself runs the full
+  // ladder via buildMealCascadeLevels.
+  return out.slice(0, 12);
+}
 
-  // Cuisine-specific queries. Try with area first, then bare.
-  const cuisines = Array.from(new Set([intent.category, ...cuisineHints]))
-    .filter((c) => c && c !== "餐厅");
-  for (const c of cuisines) {
-    if (a) push(`${a} ${c}`);
-    push(c);
+/**
+ * Build the cascading query ladder for meal/coffee directional resolution.
+ *
+ * Each returned array is one cascade level — Amap is searched once per query
+ * per level until a reliable POI shows up, then we stop. Levels widen the net:
+ *
+ *   L1  exact intent + area:           "人民广场 本帮菜", "人民广场 餐厅"
+ *   L2  generalized cuisine + area:    "人民广场 上海菜", "人民广场 江浙菜",
+ *                                      "人民广场 中餐"
+ *   L3  generic category + area:       "人民广场 餐厅", "人民广场 美食"
+ *   L4  cuisine-only (no area):        "本帮菜", "上海菜", "中餐"
+ *   L5  generic category (no area):    "餐厅", "美食", "小馆"
+ *
+ * Coffee directionals follow the same shape but with cafe-specific tokens.
+ *
+ * The ladder is bounded: each level returns at most ~6 queries, and the
+ * resolver short-circuits as soon as one query yields a reliable hit.
+ */
+export function buildMealCascadeLevels(
+  intent: DirectionalIntent,
+  cuisineHints: string[] = [],
+): string[][] {
+  const a = intent.area || "";
+  const isCoffee = intent.activity === "coffee";
+
+  // Collect cuisine tokens. Order matters: intent's own category first, then
+  // user-provided hints, then anything that came from generalizing those.
+  const baseCuisines: string[] = [];
+  const seenCuisine = new Set<string>();
+  const addCuisine = (c: string | undefined | null) => {
+    if (!c) return;
+    const t = c.trim();
+    if (!t || t === "餐厅" || seenCuisine.has(t)) return;
+    seenCuisine.add(t);
+    baseCuisines.push(t);
+  };
+  addCuisine(intent.category);
+  for (const h of cuisineHints) addCuisine(h);
+
+  // Generalized synonyms for everything we collected so far.
+  const generalized: string[] = [];
+  const seenGen = new Set<string>(seenCuisine);
+  for (const c of [...baseCuisines]) {
+    const syns = CUISINE_GENERALIZATION[c] || [];
+    for (const s of syns) {
+      if (!seenGen.has(s)) {
+        seenGen.add(s);
+        generalized.push(s);
+      }
+    }
   }
-  // Generic restaurant queries (broadest), with area first.
-  const generic =
-    intent.activity === "coffee"
-      ? ["咖啡馆", "咖啡厅", "咖啡"]
-      : ["本帮菜", "上海菜", "中餐厅", "餐厅", "小馆"];
-  for (const g of generic) {
-    if (a) push(`${a} ${g}`);
-    push(g);
-  }
-  return out.slice(0, 6);
+
+  const generic = GENERIC_CATEGORIES[intent.activity] || ["餐厅", "美食"];
+
+  const dedup = (arr: string[]): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const x of arr) {
+      const t = x.trim().replace(/\s+/g, " ");
+      if (t && !seen.has(t)) {
+        seen.add(t);
+        out.push(t);
+      }
+    }
+    return out;
+  };
+
+  const withArea = (toks: string[]): string[] =>
+    a ? toks.map((t) => `${a} ${t}`) : [];
+
+  // Level 1: exact intent (cuisine + area). Mirrors buildIntentQueries' first
+  // shot but without the bare-cuisine tail (the bare query lives in L4).
+  const l1 = dedup([
+    ...withArea(baseCuisines),
+    // Always at least one "<area> 餐厅"/"<area> 咖啡馆" query so we have a
+    // sensible category-with-area variant even when the directional name only
+    // carried a vague hint.
+    ...withArea(isCoffee ? ["咖啡馆"] : ["餐厅"]),
+  ]);
+
+  // Level 2: generalized cuisine + area.
+  const l2 = dedup(withArea(generalized));
+
+  // Level 3: generic category + area.
+  const l3 = dedup(withArea(generic));
+
+  // Level 4: cuisine-only (no area). Even without geographic biasing this can
+  // land a famous chain that we can clamp to anchor distance later.
+  const l4 = dedup([...baseCuisines, ...generalized]);
+
+  // Level 5: generic category (no area) — terminal fallback.
+  const l5 = dedup(generic);
+
+  return [l1, l2, l3, l4, l5].filter((lvl) => lvl.length > 0);
 }
 
 /**
@@ -320,11 +434,44 @@ function pickReliable(
 }
 
 /**
- * Try to resolve a single directional stop. Runs a few Amap queries and
- * returns the first reliable POI, or null when nothing passes the gate.
+ * Per-level Amap search budget for the cascade. Earlier levels search a tight
+ * radius for tightly-targeted queries; later levels widen the net so we still
+ * have a shot at finding *something* before falling back to manual confirm.
+ *
+ * `radiusMeters` is passed to `searchPoiNearby`; `limit` to both nearby and
+ * keyword searches.
+ */
+interface CascadeLevelBudget {
+  radiusMeters: number;
+  limit: number;
+}
+
+const MEAL_CASCADE_BUDGETS: CascadeLevelBudget[] = [
+  { radiusMeters: 2500, limit: 5 },   // L1 exact: tight + small
+  { radiusMeters: 3500, limit: 8 },   // L2 generalized cuisine
+  { radiusMeters: 4000, limit: 10 },  // L3 generic + area
+  { radiusMeters: 6000, limit: 15 },  // L4 cuisine-only, no area
+  { radiusMeters: 8000, limit: 20 },  // L5 generic, no area: terminal
+];
+
+/**
+ * Try to resolve a single directional stop. Runs a cascading ladder of Amap
+ * queries that progressively widen — first the intent-derived precise query,
+ * then meal-specific generalizations and generic categories — and returns the
+ * first reliable POI, or null when every level fails the gate.
  *
  * `anchor` is the most recent coord we know (start point or the previous
  * stop) — used both to constrain `searchPoiNearby` and to gate distance.
+ *
+ * Cascade structure (meal/coffee directionals):
+ *   L0  intent queries (cuisine + area, exact)            — radius 2.5km
+ *   L1  generalized cuisine + area                         — radius 3.5km
+ *   L2  generic category + area                            — radius 4km
+ *   L3  cuisine-only (no area)                             — radius 6km
+ *   L4  generic category (no area), terminal               — radius 8km
+ *
+ * Non-meal directionals (e.g. attraction) only run L0; broader generalization
+ * doesn't make sense without category supervision.
  */
 export async function resolveDirectionalStop(
   intent: DirectionalIntent,
@@ -334,46 +481,55 @@ export async function resolveDirectionalStop(
   usedKeys?: Set<string>,
   options: { cuisineHints?: string[] } = {},
 ): Promise<AmapPoi | null> {
-  const queries = buildIntentQueries(intent);
-
-  // Pass 1: intent-derived queries with the standard 2.5 km radius.
-  for (const q of queries) {
-    let pois: AmapPoi[] = [];
-    if (anchor) {
-      pois = await deps.searchNearby(anchor, q, 2500, 5);
-    }
-    if (!pois.length) {
-      pois = await deps.searchByKeyword(q, city, 5);
-    }
-    const pick = pickReliable(pois, intent.activity, anchor, usedKeys);
+  // Level 0: intent-derived queries with the standard 2.5 km radius.
+  const l0Queries = buildIntentQueries(intent);
+  const l0Budget = MEAL_CASCADE_BUDGETS[0];
+  for (const q of l0Queries) {
+    const pick = await runCascadeQuery(q, intent, anchor, city, l0Budget, deps, usedKeys);
     if (pick) return pick;
   }
 
-  // Pass 2: meal/coffee-specific fallback. Widen radius and try cuisine
-  // synonyms + generic restaurant tokens. This is what catches the common
-  // "lunch directional with no specific cuisine in the name" case so we don't
-  // leave the user with a generic 方向建议.
   const isMeal =
     intent.activity === "lunch" ||
     intent.activity === "dinner" ||
     intent.activity === "coffee";
   if (!isMeal) return null;
 
-  const fallbackQueries = buildMealFallbackQueries(intent, options.cuisineHints || []);
-  for (const q of fallbackQueries) {
-    let pois: AmapPoi[] = [];
-    if (anchor) {
-      // Wider radius (4 km) and a slightly larger result set so the gate has
-      // more candidates to filter against.
-      pois = await deps.searchNearby(anchor, q, 4000, 10);
+  // Levels 1..4: meal/coffee cascade.
+  const cascade = buildMealCascadeLevels(intent, options.cuisineHints || []);
+  for (let i = 0; i < cascade.length; i++) {
+    const queries = cascade[i];
+    const budget = MEAL_CASCADE_BUDGETS[Math.min(i + 1, MEAL_CASCADE_BUDGETS.length - 1)];
+    for (const q of queries) {
+      const pick = await runCascadeQuery(q, intent, anchor, city, budget, deps, usedKeys);
+      if (pick) return pick;
     }
-    if (!pois.length) {
-      pois = await deps.searchByKeyword(q, city, 10);
-    }
-    const pick = pickReliable(pois, intent.activity, anchor, usedKeys);
-    if (pick) return pick;
   }
   return null;
+}
+
+/**
+ * Single cascade query: nearby first (when anchor is available) at the level's
+ * radius/limit, then keyword fallback at the same limit. Returns the first POI
+ * that passes the reliability gate AND isn't already in `usedKeys`.
+ */
+async function runCascadeQuery(
+  query: string,
+  intent: DirectionalIntent,
+  anchor: AmapCoord | null,
+  city: string,
+  budget: CascadeLevelBudget,
+  deps: AmapSearchDeps,
+  usedKeys: Set<string> | undefined,
+): Promise<AmapPoi | null> {
+  let pois: AmapPoi[] = [];
+  if (anchor) {
+    pois = await deps.searchNearby(anchor, query, budget.radiusMeters, budget.limit);
+  }
+  if (!pois.length) {
+    pois = await deps.searchByKeyword(query, city, budget.limit);
+  }
+  return pickReliable(pois, intent.activity, anchor, usedKeys);
 }
 
 /**

@@ -22,6 +22,7 @@
  */
 import {
   buildIntentQueries,
+  buildMealCascadeLevels,
   buildMealFallbackQueries,
   extractDirectionalIntent,
   isPoiReliableForActivity,
@@ -781,6 +782,267 @@ const onlyConfirmedPoi: AmapPoi = {
   ok(pick !== null, "meal-fallback: pass-2 finds a real POI when pass-1 returns nothing");
   ok(pick && pick.name === realLunchPoi.name, `meal-fallback: picked real POI (got ${pick && pick.name})`);
   ok(calls >= 2, `meal-fallback: at least two search rounds (got ${calls})`);
+}
+
+/* ------------------------------------------------------------------------- */
+/* 5c. Multi-level cascade fallback                                          */
+/* ------------------------------------------------------------------------- */
+
+// 5c-i. buildMealCascadeLevels generalizes 本帮菜 to 上海菜/江浙菜/中餐.
+{
+  const intent = {
+    area: "人民广场",
+    category: "本帮菜",
+    activity: "lunch" as TimelineItem["activity_type"],
+  };
+  const levels = buildMealCascadeLevels(intent, []);
+  ok(levels.length >= 4, `cascade: at least 4 levels (got ${levels.length})`);
+  // L1: exact intent.
+  ok(
+    levels[0].some((q) => q === "人民广场 本帮菜"),
+    `cascade L1: exact intent present (got ${JSON.stringify(levels[0])})`,
+  );
+  // L2: 上海菜/江浙菜/中餐 generalization.
+  const l2 = levels[1].join("|");
+  ok(/上海菜/.test(l2), `cascade L2: 上海菜 generalization (got ${l2})`);
+  ok(/江浙菜/.test(l2), `cascade L2: 江浙菜 generalization (got ${l2})`);
+  ok(/中餐/.test(l2), `cascade L2: 中餐 generalization (got ${l2})`);
+  ok(
+    levels[1].every((q) => q.startsWith("人民广场 ")),
+    `cascade L2: still anchored to area (got ${l2})`,
+  );
+  // L3: generic + area.
+  ok(
+    levels[2].some((q) => q.includes("餐厅") && q.startsWith("人民广场")),
+    `cascade L3: generic+area present (got ${JSON.stringify(levels[2])})`,
+  );
+  // L4: cuisine-only without area.
+  ok(
+    levels[3].includes("本帮菜") || levels[3].includes("上海菜"),
+    `cascade L4: cuisine-only present (got ${JSON.stringify(levels[3])})`,
+  );
+  // L5: terminal generic without area.
+  const lTerm = levels[levels.length - 1];
+  ok(
+    lTerm.includes("餐厅") || lTerm.includes("美食"),
+    `cascade terminal: bare generic present (got ${JSON.stringify(lTerm)})`,
+  );
+}
+
+// 5c-ii. Coffee directional cascade expands to coffee fallback queries.
+{
+  const intent = {
+    area: "武康路",
+    category: "咖啡",
+    activity: "coffee" as TimelineItem["activity_type"],
+  };
+  const levels = buildMealCascadeLevels(intent, []);
+  const flat = levels.flat().join("|");
+  ok(/咖啡馆/.test(flat), `cascade coffee: 咖啡馆 present (got ${flat})`);
+  ok(/咖啡厅/.test(flat), `cascade coffee: 咖啡厅 present (got ${flat})`);
+  // Generic coffee terminals are cafe-specific, not restaurant tokens.
+  ok(!/^|\|餐厅(\||$)/.test(flat) || /咖啡|饮品|茶饮/.test(flat),
+    `cascade coffee: terminals are cafe-shaped (got ${flat})`);
+}
+
+// 5c-iii. Cascade short-circuits as soon as a level produces a reliable POI.
+//          Pass-1 returns nothing reliable for "人民广场 本帮菜"; pass-2
+//          (generalized "人民广场 上海菜") returns a real POI -> resolved.
+{
+  const realLunchPoi: AmapPoi = {
+    id: "B0FFCAS001",
+    name: "上海德兴馆(广东路店)",
+    address: "黄浦区广东路471号",
+    coord: { lng: 121.481, lat: 31.234 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  const calls: string[] = [];
+  const deps: AmapSearchDeps = {
+    searchByKeyword: async (q) => {
+      calls.push(`kw:${q}`);
+      // Only the generalized query 上海菜 returns a POI; precise 本帮菜 fails.
+      return /上海菜/.test(q) ? [realLunchPoi] : [];
+    },
+    searchNearby: async (_anchor, q) => {
+      calls.push(`nb:${q}`);
+      return /上海菜/.test(q) ? [realLunchPoi] : [];
+    },
+  };
+  const intent = {
+    area: "人民广场",
+    category: "本帮菜",
+    activity: "lunch" as TimelineItem["activity_type"],
+  };
+  const pick = await resolveDirectionalStop(
+    intent,
+    { lng: 121.48, lat: 31.23 },
+    "上海",
+    deps,
+    new Set<string>(),
+    { cuisineHints: [] },
+  );
+  ok(pick !== null, "cascade: generalized 上海菜 query returns POI");
+  ok(pick && pick.name === realLunchPoi.name, "cascade: picked the generalized POI");
+  // Should have hit at least one 本帮菜 query (precise) and one 上海菜 query
+  // (generalized) before stopping.
+  ok(
+    calls.some((c) => /本帮菜/.test(c)),
+    `cascade: precise 本帮菜 query attempted (calls: ${calls.join(", ")})`,
+  );
+  ok(
+    calls.some((c) => /上海菜/.test(c)),
+    `cascade: generalized 上海菜 query attempted (calls: ${calls.join(", ")})`,
+  );
+}
+
+// 5c-iv. Cascade falls through to generic "餐厅" / "美食" when both precise
+//          AND generalized queries are empty. Returns the real POI on the
+//          generic level.
+{
+  const realPoi: AmapPoi = {
+    id: "B0FFCAS002",
+    name: "新雅粤菜馆",
+    address: "黄浦区南京东路719号",
+    coord: { lng: 121.484, lat: 31.235 },
+    type: "餐饮服务;中餐厅;粤菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  let attempts = 0;
+  const deps: AmapSearchDeps = {
+    searchByKeyword: async (q) => {
+      attempts += 1;
+      // Only the generic 餐厅/美食 query yields a POI.
+      return /^(餐厅|美食|.*\s(餐厅|美食|小馆|中餐厅))/.test(q) ? [realPoi] : [];
+    },
+    searchNearby: async (_anchor, q) => {
+      attempts += 1;
+      return /^(餐厅|美食|.*\s(餐厅|美食|小馆|中餐厅))/.test(q) ? [realPoi] : [];
+    },
+  };
+  const intent = {
+    area: "人民广场",
+    category: "本帮菜",
+    activity: "dinner" as TimelineItem["activity_type"],
+  };
+  const pick = await resolveDirectionalStop(
+    intent,
+    { lng: 121.48, lat: 31.23 },
+    "上海",
+    deps,
+    new Set<string>(),
+    { cuisineHints: [] },
+  );
+  ok(pick !== null, "cascade: falls through to generic 餐厅 level");
+  ok(pick && pick.name === realPoi.name, `cascade: picked ${realPoi.name} from generic level`);
+  ok(attempts >= 3, `cascade: attempted multiple cascade levels (got ${attempts})`);
+}
+
+// 5c-v. Cascade still returns null when *every* level is empty -> caller
+//        falls back to manual confirm. Verifies through the full plan flow.
+{
+  const directionalRenmin: TimelineItem = {
+    start_time: "18:30",
+    end_time: "19:30",
+    title: "晚餐：人民广场附近找一家本帮菜小馆",
+    place_name: "人民广场附近找一家本帮菜小馆（方向建议）",
+    activity_type: "dinner",
+    reason: "演示版未绑定具体店铺，已转为方向建议",
+    estimated_travel_time_to_next_min: null,
+    place_kind: "directional",
+    source: "demo",
+  };
+  let levelsAttempted = 0;
+  const deps: AmapSearchDeps = {
+    searchByKeyword: async () => { levelsAttempted += 1; return []; },
+    searchNearby: async () => { levelsAttempted += 1; return []; },
+  };
+  const resp = buildResponse(directionalRenmin);
+  const { response, resolvedTotal, manualConfirmTotal } =
+    await resolveDirectionalSuggestions(resp, {
+      startCoord: { lng: 121.48, lat: 31.23 },
+      deps,
+      cuisineHints: ["本帮菜"],
+    });
+  ok(resolvedTotal === 0, `cascade-exhausted: resolvedTotal=0 (got ${resolvedTotal})`);
+  ok(manualConfirmTotal === 1, `cascade-exhausted: manualConfirm fired (got ${manualConfirmTotal})`);
+  ok(levelsAttempted >= 4, `cascade-exhausted: tried multiple levels before manual confirm (got ${levelsAttempted})`);
+  const dinner = response.plans[0].timeline.find((t) => t.activity_type === "dinner")!;
+  ok(dinner.place_kind === "directional", "cascade-exhausted: stays directional");
+  ok(dinner.place_name === "需要手动确认餐馆", `cascade-exhausted: manual-confirm placeholder (got ${dinner.place_name})`);
+}
+
+// 5c-vi. Cuisine generalization: a 茶餐厅 directional should generalize to
+//          粤菜 / 港式茶餐厅 / 中餐 across the cascade.
+{
+  const intent = {
+    area: "南京东路",
+    category: "茶餐厅",
+    activity: "lunch" as TimelineItem["activity_type"],
+  };
+  const levels = buildMealCascadeLevels(intent, []);
+  const flat = levels.flat().join("|");
+  ok(/茶餐厅/.test(flat), `cascade 茶餐厅: precise level present (got ${flat})`);
+  ok(/粤菜/.test(flat), `cascade 茶餐厅: 粤菜 generalization present (got ${flat})`);
+  ok(/港式茶餐厅/.test(flat), `cascade 茶餐厅: 港式茶餐厅 generalization present (got ${flat})`);
+}
+
+// 5c-vii. Duplicate POI is skipped across cascade levels. The same real POI
+//           is returned by both precise and generalized queries, but its
+//           dedupe key is in usedKeys, so the resolver must pull a different
+//           POI from a later level.
+{
+  const dupPoi: AmapPoi = {
+    id: "B0FFCAS_DUP",
+    name: "上海老饭店",
+    address: "黄浦区福佑路242号",
+    coord: { lng: 121.493, lat: 31.227 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  const altPoi: AmapPoi = {
+    id: "B0FFCAS_ALT",
+    name: "绿波廊",
+    address: "黄浦区豫园路115号",
+    coord: { lng: 121.491, lat: 31.226 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  const qSeen: string[] = [];
+  const deps: AmapSearchDeps = {
+    searchByKeyword: async (q) => {
+      qSeen.push(`kw:${q}`);
+      // Precise & generalized queries return the dup; only the L3 generic
+      // query "<area> 餐厅" / "<area> 美食" exposes altPoi.
+      if (/餐厅$|美食$|小馆$|中餐厅$/.test(q)) return [dupPoi, altPoi];
+      return [dupPoi];
+    },
+    searchNearby: async (_a, q) => {
+      qSeen.push(`nb:${q}`);
+      if (/餐厅$|美食$|小馆$|中餐厅$/.test(q)) return [dupPoi, altPoi];
+      return [dupPoi];
+    },
+  };
+  const used = new Set<string>([`id:${dupPoi.id}`]);
+  const intent = {
+    area: "黄浦区",
+    category: "本帮菜",
+    activity: "dinner" as TimelineItem["activity_type"],
+  };
+  const pick = await resolveDirectionalStop(
+    intent,
+    { lng: 121.49, lat: 31.23 },
+    "上海",
+    deps,
+    used,
+    { cuisineHints: [] },
+  );
+  ok(pick !== null, "cascade-dedupe: alt POI resolved despite dup in earlier levels");
+  ok(pick && pick.id === altPoi.id, `cascade-dedupe: picked alt POI not dup (got id=${pick && pick.id})`);
 }
 
 /* ------------------------------------------------------------------------- */
