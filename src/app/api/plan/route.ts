@@ -7,6 +7,7 @@ import { applyCandidatesToPlans } from "@/lib/planner-replace";
 import { geocodePlace, isAmapConfigured } from "@/lib/amap-client";
 import { sanitizePlanResponse } from "@/lib/place-sanitize";
 import { resolveDirectionalSuggestions } from "@/lib/directional-resolver";
+import { repairResponseDuplicates } from "@/lib/plan-dedupe";
 import { Constraints, Plan } from "@/types";
 
 const FIELD_LABELS: Record<string, string> = {
@@ -137,6 +138,19 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         console.warn("[plan] Directional resolution failed, keeping suggestions:", err);
       }
+    }
+
+    // Final-guard de-duplication. By this point enrichment, candidate
+    // replacement, and directional resolution have all run; if any of them
+    // — or a combination — left two concrete stops referencing the same
+    // POI in a single plan, this pass converts the later duplicate into a
+    // directional fallback and rewrites the corresponding transport leg so
+    // the user never sees "前往<同一家店>" between identical stops.
+    try {
+      const repaired = repairResponseDuplicates(sanitized);
+      sanitized = repaired.response;
+    } catch (err) {
+      console.warn("[plan] Duplicate-repair guard failed, keeping response:", err);
     }
 
     return NextResponse.json({

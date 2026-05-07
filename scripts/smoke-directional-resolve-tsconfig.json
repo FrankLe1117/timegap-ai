@@ -17,6 +17,7 @@
     "smoke-directional-resolve.ts",
     "../src/lib/directional-resolver.ts",
     "../src/lib/amap-client.ts",
+    "../src/lib/plan-dedupe.ts",
     "../src/types/index.ts"
   ]
 }

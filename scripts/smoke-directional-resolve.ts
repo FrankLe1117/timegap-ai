@@ -28,6 +28,11 @@ import {
   type AmapSearchDeps,
 } from "../src/lib/directional-resolver";
 import type { AmapPoi } from "../src/lib/amap-client";
+import {
+  repairPlanDuplicates,
+  repairResponseDuplicates,
+  stopKey,
+} from "../src/lib/plan-dedupe";
 import type { Plan, PlanResponse, TimelineItem } from "../src/types";
 
 function ok(cond: unknown, msg: string): void {
@@ -367,6 +372,312 @@ const directionalCoffee: TimelineItem = {
   const s = response.plans[0].timeline.find((t) => t.activity_type === "coffee")!;
   ok(s.place_name === "%Arabica 武康路店", `coffee stop replaced with cafe POI`);
   ok(s.place_kind === "poi", "coffee stop place_kind=poi");
+}
+
+/* ------------------------------------------------------------------------- */
+/* 4. Plan-level dedupe                                                      */
+/* ------------------------------------------------------------------------- */
+
+// Helper: build a 2-stop plan response (lunch + dinner) where both slots
+// start as directional suggestions. Used for the "two directionals resolve
+// to the same POI" scenario.
+function buildLunchDinnerResponse(): PlanResponse {
+  const lunch: TimelineItem = {
+    start_time: "12:00",
+    end_time: "13:00",
+    title: "午餐：黄浦区附近找一家老字号餐厅小馆",
+    place_name: "黄浦区附近找一家老字号餐厅小馆（方向建议）",
+    activity_type: "lunch",
+    reason: "演示版未绑定具体店铺，已转为方向建议",
+    estimated_travel_time_to_next_min: null,
+    place_kind: "directional",
+    source: "demo",
+  };
+  const dinner: TimelineItem = {
+    start_time: "18:30",
+    end_time: "19:30",
+    title: "晚餐：黄浦区附近找一家老字号餐厅小馆",
+    place_name: "黄浦区附近找一家老字号餐厅小馆（方向建议）",
+    activity_type: "dinner",
+    reason: "演示版未绑定具体店铺，已转为方向建议",
+    estimated_travel_time_to_next_min: null,
+    place_kind: "directional",
+    source: "demo",
+  };
+  const transportLunch: TimelineItem = {
+    start_time: "11:30",
+    end_time: "12:00",
+    title: `前往${lunch.place_name}`,
+    place_name: lunch.place_name,
+    activity_type: "transport",
+    reason: "驾车/打车，预计30分钟",
+    estimated_travel_time_to_next_min: null,
+    travel_mode: "驾车/打车",
+  };
+  const transportDinner: TimelineItem = {
+    start_time: "18:00",
+    end_time: "18:30",
+    title: `前往${dinner.place_name}`,
+    place_name: dinner.place_name,
+    activity_type: "transport",
+    reason: "驾车/打车，预计30分钟",
+    estimated_travel_time_to_next_min: null,
+    travel_mode: "驾车/打车",
+  };
+  const plan: Plan = {
+    plan_name: "测试方案",
+    plan_type: "balanced",
+    one_sentence_summary: "",
+    tradeoff_summary: "",
+    suitability_tags: {
+      time_safety: "High",
+      rush_hour_exposure: "Low",
+      walking_intensity: "Low",
+      local_experience: "High",
+      luggage_friendly: "High",
+      weather_robustness: "High",
+      station_arrival_confidence: 80,
+      experience_score: 70,
+    },
+    timeline: [transportLunch, lunch, transportDinner, dinner],
+    route_chain: [
+      { from: "起点", to: lunch.place_name, travel_min: 30, kind: "leg", mode: "驾车/打车" },
+      {
+        from: lunch.place_name,
+        to: lunch.place_name,
+        travel_min: 0,
+        kind: "stop",
+        stop_duration_min: 60,
+        activity_type: lunch.activity_type,
+      },
+      { from: lunch.place_name, to: dinner.place_name, travel_min: 30, kind: "leg", mode: "驾车/打车" },
+      {
+        from: dinner.place_name,
+        to: dinner.place_name,
+        travel_min: 0,
+        kind: "stop",
+        stop_duration_min: 60,
+        activity_type: dinner.activity_type,
+      },
+    ],
+    latest_leave_for_station: "21:00",
+    risk_note: "",
+    backup_suggestion: "",
+    explanation: "",
+  };
+  return {
+    parsedConstraints: {
+      city: "上海",
+      start_location: "外滩",
+      start_time: "11:00",
+      final_destination: "虹桥火车站",
+      departure_time: "21:00",
+      preferences: ["local_food"],
+      constraints: [],
+      budget_per_person: null,
+      luggage: false,
+      weather: "unknown",
+      walking_preference: "medium",
+      food_preference: ["本帮菜"],
+      plan_style: "balanced",
+    },
+    timeBudget: {
+      free_window_min: 600,
+      station_buffer_min: 45,
+      planning_deadline: "20:00",
+      estimated_final_transfer_min: 30,
+      latest_leave_for_station: "20:00",
+      safe_activity_time_min: 540,
+      rush_hour_detected: false,
+      rush_hour_note: "",
+    },
+    plans: [plan],
+    dataSources: {
+      places: "演示城市地点库",
+      travelTimes: "演示交通图",
+      apiReady: "未接入高德",
+      routesSource: "demo",
+      amapConfigured: true,
+    },
+  };
+}
+
+const onlyConfirmedPoi: AmapPoi = {
+  id: "B0FFGPX001",
+  name: "上海老饭店",
+  address: "黄浦区福佑路242号",
+  coord: { lng: 121.493, lat: 31.227 },
+  type: "餐饮服务;中餐厅;本帮江浙菜",
+  district: "黄浦区",
+  hasRealId: true,
+};
+
+// 4a. Two directional stops, one reliable POI: only the first slot wins, the
+//     second stays directional with no map link.
+{
+  const resp = buildLunchDinnerResponse();
+  const deps = makeDeps([onlyConfirmedPoi]);
+  const { response, resolvedTotal } = await resolveDirectionalSuggestions(resp, {
+    startCoord: { lng: 121.49, lat: 31.23 },
+    deps,
+  });
+  ok(resolvedTotal === 1, `dedupe: only one slot resolved (got ${resolvedTotal})`);
+  const stops = response.plans[0].timeline.filter(
+    (t) => t.activity_type !== "transport" && t.activity_type !== "station_buffer",
+  );
+  const concrete = stops.filter((s) => s.place_kind === "poi");
+  ok(concrete.length === 1, `dedupe: exactly one concrete POI in plan (got ${concrete.length})`);
+  ok(concrete[0].place_name === onlyConfirmedPoi.name, "dedupe: earlier slot kept the POI");
+
+  const directional = stops.filter((s) => s.place_kind === "directional");
+  ok(directional.length === 1, `dedupe: later slot stayed directional (got ${directional.length})`);
+  ok(!directional[0].amap_url, "dedupe: directional fallback has no amap_url");
+  ok(directional[0].lng == null && directional[0].lat == null, "dedupe: directional fallback has no coords");
+
+  // No transport title 前往<same place> linking the two identical concrete stops.
+  const transports = response.plans[0].timeline.filter((t) => t.activity_type === "transport");
+  const dupTransport = transports.find((t) => t.place_name === onlyConfirmedPoi.name && t.title === `前往${onlyConfirmedPoi.name}`);
+  // Only the first slot's transport leg may title 前往<上海老饭店>; not both.
+  const transportTitles = transports.map((t) => t.title);
+  const sameTitleCount = transportTitles.filter((t) => t === `前往${onlyConfirmedPoi.name}`).length;
+  ok(sameTitleCount <= 1, `dedupe: at most one transport titled 前往${onlyConfirmedPoi.name} (got ${sameTitleCount})`);
+  // Sanity: that single transport (if any) feeds the concrete stop, not the directional one.
+  if (dupTransport) {
+    const idx = response.plans[0].timeline.indexOf(dupTransport);
+    const next = response.plans[0].timeline[idx + 1];
+    ok(next && next.place_name === onlyConfirmedPoi.name, "dedupe: dup-named transport feeds the concrete stop");
+  }
+}
+
+// 4b. First Amap result is a duplicate of the lunch slot, second is reliable
+//     and distinct: resolver should pick the second for the dinner slot.
+{
+  const resp = buildLunchDinnerResponse();
+  const altPoi: AmapPoi = {
+    id: "B0FFGPX002",
+    name: "绿波廊",
+    address: "黄浦区豫园路115号",
+    coord: { lng: 121.491, lat: 31.226 },
+    type: "餐饮服务;中餐厅;本帮江浙菜",
+    district: "黄浦区",
+    hasRealId: true,
+  };
+  // Lunch sees [confirmedPoi]. Dinner sees [confirmedPoi (duplicate), altPoi].
+  let call = 0;
+  const deps: AmapSearchDeps = {
+    searchByKeyword: async () => {
+      call += 1;
+      return call <= 1 ? [onlyConfirmedPoi] : [onlyConfirmedPoi, altPoi];
+    },
+    searchNearby: async () => {
+      call += 1;
+      return call <= 1 ? [onlyConfirmedPoi] : [onlyConfirmedPoi, altPoi];
+    },
+  };
+  const { response, resolvedTotal } = await resolveDirectionalSuggestions(resp, {
+    startCoord: { lng: 121.49, lat: 31.23 },
+    deps,
+  });
+  ok(resolvedTotal === 2, `alt-pick: both slots resolved (got ${resolvedTotal})`);
+  const stops = response.plans[0].timeline.filter(
+    (t) => t.activity_type !== "transport" && t.activity_type !== "station_buffer",
+  );
+  const names = stops.map((s) => s.place_name);
+  ok(names.includes(onlyConfirmedPoi.name), "alt-pick: lunch kept first POI");
+  ok(names.includes(altPoi.name), "alt-pick: dinner picked alternate POI");
+  ok(new Set(names).size === stops.length, "alt-pick: all stop names are distinct");
+}
+
+// 4c. Repair guard: a plan that arrives with two identical concrete POIs
+//     (e.g. enrichment + earlier resolution drift) should be repaired.
+{
+  const sharedStop: TimelineItem = {
+    start_time: "12:00",
+    end_time: "13:00",
+    title: `午餐：${onlyConfirmedPoi.name}`,
+    place_name: onlyConfirmedPoi.name,
+    place_id: onlyConfirmedPoi.id,
+    activity_type: "lunch",
+    reason: "高德验证",
+    estimated_travel_time_to_next_min: null,
+    lng: onlyConfirmedPoi.coord.lng,
+    lat: onlyConfirmedPoi.coord.lat,
+    amap_url: "https://uri.amap.com/marker?dummy",
+    source: "amap",
+    candidate_reliability: "confirmed",
+    place_kind: "poi",
+  };
+  const dupStop: TimelineItem = { ...sharedStop, start_time: "18:30", end_time: "19:30", title: `晚餐：${onlyConfirmedPoi.name}`, activity_type: "dinner" };
+  const transport1: TimelineItem = {
+    start_time: "11:30",
+    end_time: "12:00",
+    title: `前往${onlyConfirmedPoi.name}`,
+    place_name: onlyConfirmedPoi.name,
+    activity_type: "transport",
+    reason: "驾车/打车",
+    estimated_travel_time_to_next_min: null,
+    travel_mode: "驾车/打车",
+    lng: onlyConfirmedPoi.coord.lng,
+    lat: onlyConfirmedPoi.coord.lat,
+    amap_url: "https://uri.amap.com/nav?dummy",
+  };
+  const transport2: TimelineItem = { ...transport1, start_time: "18:00", end_time: "18:30" };
+  const dupPlan: Plan = {
+    plan_name: "重复方案",
+    plan_type: "balanced",
+    one_sentence_summary: "",
+    tradeoff_summary: "",
+    suitability_tags: {
+      time_safety: "High", rush_hour_exposure: "Low", walking_intensity: "Low",
+      local_experience: "High", luggage_friendly: "High", weather_robustness: "High",
+      station_arrival_confidence: 80, experience_score: 70,
+    },
+    timeline: [transport1, sharedStop, transport2, dupStop],
+    route_chain: [
+      { from: "起点", to: onlyConfirmedPoi.name, travel_min: 30, kind: "leg" },
+      { from: onlyConfirmedPoi.name, to: onlyConfirmedPoi.name, travel_min: 0, kind: "stop", stop_duration_min: 60, activity_type: "lunch" },
+      { from: onlyConfirmedPoi.name, to: onlyConfirmedPoi.name, travel_min: 30, kind: "leg" },
+      { from: onlyConfirmedPoi.name, to: onlyConfirmedPoi.name, travel_min: 0, kind: "stop", stop_duration_min: 60, activity_type: "dinner" },
+    ],
+    latest_leave_for_station: "21:00",
+    risk_note: "",
+    backup_suggestion: "",
+    explanation: "",
+  };
+  const { plan: repaired, convertedCount } = repairPlanDuplicates(dupPlan);
+  ok(convertedCount === 1, `repair: converted exactly one duplicate (got ${convertedCount})`);
+  const stops = repaired.timeline.filter(
+    (t) => t.activity_type !== "transport" && t.activity_type !== "station_buffer",
+  );
+  ok(stops[0].place_kind === "poi", "repair: first concrete stop kept");
+  ok(stops[0].place_name === onlyConfirmedPoi.name, "repair: first concrete stop name unchanged");
+  ok(stops[1].place_kind === "directional", "repair: second stop converted to directional");
+  ok(!stops[1].amap_url, "repair: directional fallback dropped amap_url");
+  ok(stops[1].lng == null && stops[1].lat == null, "repair: directional fallback dropped coords");
+  ok(/方向建议/.test(stops[1].place_name), `repair: place_name marked directional (got ${stops[1].place_name})`);
+
+  // The transport leg that fed the duplicate stop must no longer title
+  // 前往<onlyConfirmedPoi.name>; it should now point at the directional name.
+  const lastTransport = repaired.timeline.filter((t) => t.activity_type === "transport").pop()!;
+  ok(lastTransport.place_name !== onlyConfirmedPoi.name, "repair: trailing transport leg name updated");
+  ok(lastTransport.title !== `前往${onlyConfirmedPoi.name}`, "repair: trailing transport title is no longer 前往<同一家店>");
+  ok(lastTransport.place_kind === "directional", "repair: trailing transport place_kind=directional");
+  ok(!lastTransport.amap_url, "repair: trailing transport amap_url stripped");
+
+  // Sanity: the converted stop no longer keys to the same POI as the kept one.
+  // Directional fallbacks intentionally have no dedupe key (stopKey returns
+  // null) so a future second resolution pass treats them as fresh slots.
+  const k0 = stopKey(stops[0]);
+  const k1 = stopKey(stops[1]);
+  ok(!!k0 && k1 == null, `repair: kept stop has key, converted stop has none (k0=${k0}, k1=${k1})`);
+}
+
+// 4d. repairResponseDuplicates is a pure no-op when there are no duplicates.
+{
+  const resp = buildResponse(directionalDinner);
+  const { response, convertedTotal } = repairResponseDuplicates(resp);
+  ok(convertedTotal === 0, "repair-response: no-op when no duplicates");
+  ok(response === resp, "repair-response: identity preserved on no-op");
 }
 
 console.log("\nALL DIRECTIONAL-RESOLVER SMOKE ASSERTIONS PASSED");

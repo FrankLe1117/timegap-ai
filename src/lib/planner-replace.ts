@@ -23,6 +23,7 @@ import {
   RouteHop,
   TimelineItem,
 } from "@/types";
+import { stopKey } from "./plan-dedupe";
 import {
   AmapCoord,
   buildAmapMarkerUrl,
@@ -99,8 +100,17 @@ function pickCandidateForSlot(
 ): Candidate | null {
   // Reliability gate: only candidates that explicitly cleared validation may
   // replace a demo stop. This is the firewall that keeps synthetic-looking
-  // names like "徐家汇本帮小馆" out of the itinerary.
-  const pool = candidates.filter((c) => !used.has(c.id) && c.allow_in_itinerary);
+  // names like "徐家汇本帮小馆" out of the itinerary. We also exclude any
+  // candidate whose dedupe key matches one already used in this plan — both
+  // by raw id and by name+coord bucket, so two candidates with different
+  // upstream ids but the same shop don't both land in the same plan.
+  const pool = candidates.filter((c) => {
+    if (!c.allow_in_itinerary) return false;
+    if (used.has(`id:${c.id}`)) return false;
+    const nameKey = `nc:${(c.name || "").trim().toLowerCase().replace(/\s+/g, "")}@${c.coord.lng.toFixed(3)},${c.coord.lat.toFixed(3)}`;
+    if (used.has(nameKey)) return false;
+    return true;
+  });
   if (pool.length === 0) return null;
   const ranked = pool
     .map((c) => {
@@ -346,7 +356,15 @@ async function applyToPlan(
   departureMinAbs: number,
   stationBufferMin: number,
 ): Promise<{ plan: Plan; replacedCount: number; sources: Set<"amap" | "meituan"> }> {
+  // `used` holds dedupe keys ("id:<id>" and "nc:<name>@<bucket>") for every
+  // concrete stop already locked into this plan. We seed it from any stop
+  // already enriched/upstream so candidate replacement can't accidentally
+  // produce two slots pointing at the same shop.
   const used = new Set<string>();
+  for (const it of plan.timeline) {
+    const k = stopKey(it);
+    if (k) used.add(k);
+  }
   const stops = plan.timeline.filter(
     (t) => t.activity_type !== "transport" && t.activity_type !== "station_buffer",
   );
@@ -381,7 +399,10 @@ async function applyToPlan(
 
     const pick = pickCandidateForSlot(candidates, used, startCoord, destCoord, isLastStop);
     if (!pick) continue;
-    used.add(pick.id);
+    used.add(`id:${pick.id}`);
+    used.add(
+      `nc:${(pick.name || "").trim().toLowerCase().replace(/\s+/g, "")}@${pick.coord.lng.toFixed(3)},${pick.coord.lat.toFixed(3)}`,
+    );
 
     // Build a fresh title that no longer references the original demo name.
     // If the original title contained the old place name (common), substitute

@@ -33,6 +33,17 @@ import type {
   RouteHop,
   TimelineItem,
 } from "@/types";
+import { collectUsedKeys, stopKey } from "./plan-dedupe";
+
+/** Build the dedupe key Amap POIs map to. Mirrors `stopKey` for resolved stops:
+ *  prefer the real upstream id, otherwise normalized name + ~110 m bucket. */
+function poiDedupeKey(poi: AmapPoi): string {
+  if (poi.hasRealId && poi.id && !poi.id.startsWith("poi:") && !poi.id.startsWith("geo:")) {
+    return `id:${poi.id}`;
+  }
+  const name = (poi.name || "").trim().toLowerCase().replace(/\s+/g, "");
+  return `nc:${name}@${poi.coord.lng.toFixed(3)},${poi.coord.lat.toFixed(3)}`;
+}
 
 /**
  * Decoded intent for a directional suggestion. We extract this from the
@@ -242,16 +253,23 @@ export function isPoiReliableForActivity(
 }
 
 /**
- * Return the first POI from `pois` that passes the reliability gate.
- * Preserves input order — callers should pre-rank by proximity if desired.
+ * Return the first POI from `pois` that passes the reliability gate AND
+ * whose dedupe key is not already in `usedKeys`. Preserves input order —
+ * callers should pre-rank by proximity if desired.
+ *
+ * `usedKeys` lets us skip a POI that an earlier slot in the same plan has
+ * already locked in (e.g. lunch picked it; we want a different dinner spot).
  */
 function pickReliable(
   pois: AmapPoi[],
   activity: TimelineItem["activity_type"],
   anchor?: AmapCoord | null,
+  usedKeys?: Set<string>,
 ): AmapPoi | null {
   for (const p of pois) {
-    if (isPoiReliableForActivity(p, activity, anchor)) return p;
+    if (!isPoiReliableForActivity(p, activity, anchor)) continue;
+    if (usedKeys && usedKeys.has(poiDedupeKey(p))) continue;
+    return p;
   }
   return null;
 }
@@ -268,6 +286,7 @@ export async function resolveDirectionalStop(
   anchor: AmapCoord | null,
   city = "上海",
   deps: AmapSearchDeps = DEFAULT_DEPS,
+  usedKeys?: Set<string>,
 ): Promise<AmapPoi | null> {
   const queries = buildIntentQueries(intent);
 
@@ -279,7 +298,7 @@ export async function resolveDirectionalStop(
     if (!pois.length) {
       pois = await deps.searchByKeyword(q, city, 5);
     }
-    const pick = pickReliable(pois, intent.activity, anchor);
+    const pick = pickReliable(pois, intent.activity, anchor, usedKeys);
     if (pick) return pick;
   }
   return null;
@@ -326,6 +345,13 @@ function rebuildStopFromPoi(
 }
 
 interface ResolutionRewrite {
+  /** Index in `newTimeline` of the resolved stop. The transport leg at
+   *  `index - 1` (when present and of activity_type=transport) feeds this
+   *  stop and should be rewritten to the new POI. We use index — not just
+   *  name match — because two directional slots in the same plan can share
+   *  the same `place_name`, in which case a name-only match would incorrectly
+   *  rewrite both legs. */
+  stopIndex: number;
   /** Original directional place_name as it appeared in the timeline. */
   oldName: string;
   /** New concrete POI place_name. */
@@ -348,6 +374,11 @@ async function resolvePlan(
   // coord; updated as we walk past stops with known coords.
   let anchor: AmapCoord | null = startCoord;
 
+  // Seed dedupe keys with whatever concrete stops the plan already has —
+  // anything resolved upstream by enrichment / candidate replacement counts
+  // as "already used" for directional resolution within this plan.
+  const usedKeys = collectUsedKeys(plan.timeline, plan.timeline.length);
+
   for (const item of plan.timeline) {
     if (!isDirectionalStop(item)) {
       // Non-directional stops can update the anchor when they have coords.
@@ -361,7 +392,7 @@ async function resolvePlan(
     const intent = extractDirectionalIntent(item);
     let poi: AmapPoi | null = null;
     try {
-      poi = await resolveDirectionalStop(intent, anchor, city, deps);
+      poi = await resolveDirectionalStop(intent, anchor, city, deps, usedKeys);
     } catch (err) {
       console.warn("[directional-resolver] resolve failed for", item.place_name, err);
       poi = null;
@@ -372,10 +403,16 @@ async function resolvePlan(
     }
     const rebuilt = rebuildStopFromPoi(item, poi);
     rewrites.push({
+      stopIndex: newTimeline.length,
       oldName: item.place_name,
       newName: rebuilt.place_name,
       coord: poi.coord,
     });
+    // Stamp the resolved POI into both keys-used and the rebuilt stop's
+    // dedupe key so subsequent slots can't pick it again.
+    usedKeys.add(poiDedupeKey(poi));
+    const k = stopKey(rebuilt);
+    if (k) usedKeys.add(k);
     anchor = poi.coord;
     newTimeline.push(rebuilt);
   }
@@ -384,15 +421,22 @@ async function resolvePlan(
     return { plan, resolvedCount: 0 };
   }
 
-  // Patch transport legs whose place_name pointed at the directional stop
-  // we just rewrote. Walk the timeline a second time so we can also recompute
-  // route_options using the resolved coord and the previous stop's coord.
+  // Patch the transport leg that immediately precedes each resolved stop.
+  // Walk the timeline a second time so we can also recompute route_options
+  // using the resolved coord and the previous stop's coord.
+  // Index-based: rewrite a transport leg only when the *next* timeline slot
+  // is one of the stops we just resolved. This avoids the case where two
+  // directional slots in the same plan share a place_name — a name-match
+  // patch would rewrite both legs, even though only one was resolved.
+  const rewriteByStopIndex = new Map<number, ResolutionRewrite>();
+  for (const r of rewrites) rewriteByStopIndex.set(r.stopIndex, r);
   type StopCoord = { name: string; coord?: AmapCoord };
   let prev: StopCoord = { name: "", coord: startCoord ?? undefined };
   const patched: TimelineItem[] = [];
-  for (const it of newTimeline) {
+  for (let idx = 0; idx < newTimeline.length; idx++) {
+    const it = newTimeline[idx];
     if (it.activity_type === "transport") {
-      const rw = rewrites.find((r) => r.oldName === it.place_name);
+      const rw = rewriteByStopIndex.get(idx + 1);
       if (rw) {
         const newCoord = rw.coord;
         const navUrl = prev.coord
