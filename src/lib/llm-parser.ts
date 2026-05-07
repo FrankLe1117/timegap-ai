@@ -142,6 +142,7 @@ function buildResultFromLlm(json: LlmJson, userInput: string): ParseResult {
 
   const constraints: Constraints = {
     city: profile.en,
+    city_cn: profile.zh,
     start_location: startLoc || ruleFallback.start_location,
     start_time: finalStartTime,
     final_destination: endLoc || ruleFallback.final_destination,

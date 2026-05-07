@@ -23,6 +23,7 @@ import {
   isAmapConfigured,
 } from "./amap-client";
 import { Plan, PlanResponse, RouteHop, TimelineItem } from "@/types";
+import { cityNameForAmap } from "./city-detect";
 
 const ENRICHMENT_BUDGET_MS = 6000;
 
@@ -54,7 +55,7 @@ function exceededBudget(c: ResolveCache): boolean {
   return Date.now() - c.start > ENRICHMENT_BUDGET_MS;
 }
 
-async function resolvePlace(name: string, c: ResolveCache): Promise<AmapPoi | null> {
+async function resolvePlace(name: string, c: ResolveCache, city: string): Promise<AmapPoi | null> {
   if (!name) return null;
   const cached = c.cache.get(name);
   if (cached !== undefined) return cached;
@@ -62,7 +63,7 @@ async function resolvePlace(name: string, c: ResolveCache): Promise<AmapPoi | nu
     c.cache.set(name, null);
     return null;
   }
-  const poi = await geocodePlace(name);
+  const poi = await geocodePlace(name, city);
   c.cache.set(name, poi);
   return poi;
 }
@@ -71,6 +72,9 @@ export async function enrichPlanWithAmap(input: PlanResponse): Promise<PlanRespo
   if (!isAmapConfigured()) return input;
 
   const cache: ResolveCache = { cache: new Map(), start: Date.now() };
+  const city =
+    input.parsedConstraints.city_cn ||
+    cityNameForAmap(input.parsedConstraints.city);
 
   let totalLegs = 0;
   let amapLegs = 0;
@@ -80,7 +84,7 @@ export async function enrichPlanWithAmap(input: PlanResponse): Promise<PlanRespo
   for (const plan of input.plans) {
     const newTimeline: TimelineItem[] = [];
     let prevPlace = input.parsedConstraints.start_location;
-    let prevPoi = await resolvePlace(prevPlace, cache);
+    let prevPoi = await resolvePlace(prevPlace, cache, city);
 
     // We mutate by walking the timeline sequentially; each transport leg may
     // shift downstream times if we replace the duration. We track a delta so
@@ -100,7 +104,7 @@ export async function enrichPlanWithAmap(input: PlanResponse): Promise<PlanRespo
           item.source && item.source !== "demo" && item.lng != null && item.lat != null;
         const toPoi = itemHasTrustedCoords
           ? { id: item.place_id || `cand:${item.place_name}`, name: item.place_name, coord: { lng: item.lng!, lat: item.lat! } }
-          : await resolvePlace(item.place_name, cache);
+          : await resolvePlace(item.place_name, cache, city);
         let newDur = originalDur;
         let amapHit = false;
         if (prevPoi && toPoi) {
@@ -151,7 +155,7 @@ export async function enrichPlanWithAmap(input: PlanResponse): Promise<PlanRespo
           ? null
           : item.activity_type === "station_buffer"
             ? prevPoi
-            : await resolvePlace(item.place_name, cache);
+            : await resolvePlace(item.place_name, cache, city);
         const stopLng = isResolvedCandidate ? item.lng : poi?.coord.lng;
         const stopLat = isResolvedCandidate ? item.lat : poi?.coord.lat;
         const stopAmapUrl = isResolvedCandidate

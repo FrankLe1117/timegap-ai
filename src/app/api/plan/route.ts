@@ -7,6 +7,11 @@ import { applyCandidatesToPlans } from "@/lib/planner-replace";
 import { geocodePlace, isAmapConfigured } from "@/lib/amap-client";
 import { sanitizePlanResponse } from "@/lib/place-sanitize";
 import {
+  applyResolverToConstraints,
+  resolveLocationContext,
+} from "@/lib/amap-resolver";
+import { cityNameForAmap } from "@/lib/city-detect";
+import {
   resolveDirectionalSuggestions,
   resolveMealReplacement,
 } from "@/lib/directional-resolver";
@@ -53,6 +58,36 @@ export async function POST(request: NextRequest) {
 
     const parseResult = await parseConstraintsSmart(userInput);
 
+    // Amap-driven location resolver. Runs after the rule/LLM parser so it can
+    // overwrite weak Shanghai-default guesses with concrete POIs in any Amap-
+    // supported city. No-op when AMAP_API_KEY is missing — we keep the parser's
+    // city-registry fallback in that case.
+    if (isAmapConfigured()) {
+      try {
+        const ctx = await resolveLocationContext({
+          userText: userInput,
+          parserCity: parseResult.constraints.city,
+          startQuery: parseResult.constraints.start_location,
+          destQuery: parseResult.constraints.final_destination,
+        });
+        if (ctx) {
+          parseResult.constraints = applyResolverToConstraints(parseResult.constraints, ctx);
+          // Drop now-resolved fields from the missing/assumption lists so we
+          // don't ask the user to confirm something Amap already nailed.
+          if (ctx.start) {
+            parseResult.missing = parseResult.missing.filter((m) => m !== "start_location");
+            parseResult.assumptions = parseResult.assumptions.filter((a) => !a.includes("起点默认设为"));
+          }
+          if (ctx.destination) {
+            parseResult.missing = parseResult.missing.filter((m) => m !== "final_destination");
+            parseResult.assumptions = parseResult.assumptions.filter((a) => !a.includes("终点默认设为"));
+          }
+        }
+      } catch (err) {
+        console.warn("[plan] Amap location resolver failed, keeping parser output:", err);
+      }
+    }
+
     // If this is a brand-new request (no previousPlans, no quick-action constraints)
     // and we are missing core fields, ask the user to confirm before planning.
     const isFirstRequest = !previousPlans && !currentConstraints;
@@ -91,9 +126,18 @@ export async function POST(request: NextRequest) {
     let startCoord: { lng: number; lat: number } | null = null;
     if (isAmapConfigured()) {
       try {
+        // Reuse the resolver's POIs when available so we don't re-geocode the
+        // same string under the wrong (Shanghai) city default.
+        const cityForLookup = parseResult.constraints.city_cn || cityNameForAmap(parseResult.constraints.city);
+        const cachedStart = parseResult.constraints.start_place
+          ? { coord: { lng: parseResult.constraints.start_place.lng, lat: parseResult.constraints.start_place.lat } }
+          : null;
+        const cachedDest = parseResult.constraints.destination_place
+          ? { coord: { lng: parseResult.constraints.destination_place.lng, lat: parseResult.constraints.destination_place.lat } }
+          : null;
         const [startPoi, destPoi] = await Promise.all([
-          geocodePlace(parseResult.constraints.start_location),
-          geocodePlace(parseResult.constraints.final_destination),
+          cachedStart ?? geocodePlace(parseResult.constraints.start_location, cityForLookup),
+          cachedDest ?? geocodePlace(parseResult.constraints.final_destination, cityForLookup),
         ]);
         startCoord = startPoi?.coord ?? null;
         const pool = await buildCandidatePool(parseResult.constraints, {
@@ -164,7 +208,9 @@ export async function POST(request: NextRequest) {
         const cuisineHints = (sanitized.parsedConstraints.food_preference || []).filter(
           (s): s is string => typeof s === "string" && s.trim().length > 0,
         );
-        const city = sanitized.parsedConstraints.city || "上海";
+        const city =
+          sanitized.parsedConstraints.city_cn ||
+          cityNameForAmap(sanitized.parsedConstraints.city);
         const repaired = await repairResponseDuplicatesWithAmap(
           sanitized,
           async ({ duplicate, anchor, usedKeys }) => {

@@ -34,6 +34,7 @@ import type {
   TimelineItem,
 } from "@/types";
 import { collectUsedKeys, convertStopToDirectional, stopKey } from "./plan-dedupe";
+import { cityNameForAmap } from "./city-detect";
 
 /** Build the dedupe key Amap POIs map to. Mirrors `stopKey` for resolved stops:
  *  prefer the real upstream id, otherwise normalized name + ~110 m bucket. */
@@ -898,7 +899,10 @@ export async function resolveDirectionalSuggestions(
     return { response, resolvedTotal: 0, manualConfirmTotal: 0 };
   }
 
-  const city = opts.city || response.parsedConstraints.city || "上海";
+  const city =
+    opts.city ||
+    response.parsedConstraints.city_cn ||
+    cityNameForAmap(response.parsedConstraints.city);
   const startCoord = opts.startCoord ?? null;
   const cuisineHints = Array.from(
     new Set([

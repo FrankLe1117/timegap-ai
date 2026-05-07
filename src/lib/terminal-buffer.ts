@@ -104,7 +104,11 @@ export function decideTerminalBuffer(
   ctx: BufferContext = {},
 ): BufferDecision {
   const userText = ctx.userText || "";
-  const kind = detectTerminalKind(constraints.final_destination, userText);
+  // Prefer the Amap-resolved terminal kind when present (e.g. resolver knows
+  // 西安北站 is a 火车站 from POI type) — otherwise fall back to the regex
+  // detector against the destination string + user text.
+  const resolvedKind = constraints.destination_place?.terminalKind;
+  const kind: TerminalKind = resolvedKind || detectTerminalKind(constraints.final_destination, userText);
   let base = BASE_BY_KIND[kind];
   const addons: { label: string; minutes: number }[] = [];
 

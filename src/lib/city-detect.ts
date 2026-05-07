@@ -383,4 +383,45 @@ export function profileByKey(key: CityKey | string | undefined | null): CityProf
   return SHANGHAI;
 }
 
+/**
+ * Best-effort lookup for a city profile from a name as Amap returns it
+ * ("广州市" / "上海市" / "Guangzhou City" etc). Returns null when no known
+ * profile matches — caller should treat that as "Amap-driven city, no
+ * profile-specific anchors" rather than falling back to Shanghai.
+ */
+export function findProfileByCityName(cityName: string | undefined | null): CityProfile | null {
+  if (!cityName) return null;
+  const raw = String(cityName).trim();
+  if (!raw) return null;
+  // Strip trailing 市/区/省 (Amap often returns "广州市", "西安市" etc.)
+  const stripped = raw.replace(/(市|区|省|特别行政区)$/u, "").trim();
+  const lower = raw.toLowerCase();
+  const lowerStripped = stripped.toLowerCase();
+  for (const p of ALL_PROFILES) {
+    if (p.zh === raw || p.zh === stripped) return p;
+    if (p.en.toLowerCase() === lower || p.en.toLowerCase() === lowerStripped) return p;
+    if (p.key === lowerStripped) return p;
+    for (const a of p.cityAliases) {
+      if (a.toLowerCase() === lower || a.toLowerCase() === lowerStripped) return p;
+    }
+  }
+  return null;
+}
+
+/**
+ * Normalize an arbitrary city label (English en, profile key, Chinese zh, or
+ * Amap "广州市") to the Chinese name suitable for passing back to Amap as the
+ * `city` parameter. Returns the input unchanged when no profile matches and
+ * the input already looks Chinese; returns "上海" as last-resort fallback for
+ * empty input.
+ */
+export function cityNameForAmap(label: string | undefined | null): string {
+  if (!label || !String(label).trim()) return "上海";
+  const raw = String(label).trim();
+  const profile = findProfileByCityName(raw);
+  if (profile) return profile.zh;
+  if (/[一-鿿]/.test(raw)) return raw;
+  return "上海";
+}
+
 export const CITY_PROFILES = PROFILES;

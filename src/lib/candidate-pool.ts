@@ -19,6 +19,7 @@ import {
 } from "./amap-client";
 import { Constraints } from "@/types";
 import { searchMeituanDeals, isMeituanConfigured } from "./meituan-client";
+import { cityNameForAmap } from "./city-detect";
 
 export type CandidateCategory =
   | "restaurant"
@@ -362,7 +363,9 @@ export async function buildCandidatePool(
   if (!isAmapConfigured()) return EMPTY_POOL;
 
   const limit = opts.perCategoryLimit ?? 6;
-  const city = constraints.city || "上海";
+  // Prefer the Amap-resolved Chinese city name when available; otherwise map
+  // the legacy English `city` field back to Chinese before passing it to Amap.
+  const city = constraints.city_cn || cityNameForAmap(constraints.city);
   const start = opts.startCoord || null;
   const dest = opts.destCoord || null;
 

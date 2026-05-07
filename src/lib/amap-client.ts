@@ -33,6 +33,15 @@ export interface AmapPoi {
   coord: AmapCoord;
   type?: string;
   district?: string;
+  /** Resolved city name from Amap response (e.g. "广州市"), when available.
+   *  Used by the multi-city resolver to bias subsequent POI searches into the
+   *  right city instead of defaulting to "上海". */
+  cityName?: string;
+  /** Amap city code (e.g. "020"), when available. */
+  cityCode?: string;
+  /** Amap adcode (e.g. "440100" for Guangzhou), when available. Carries the
+   *  authoritative administrative-division code we can pass back to Amap. */
+  adcode?: string;
   /** True when `id` was supplied by the upstream API (i.e. a real POI id),
    *  false when we synthesized it because the response omitted one. Reliability
    *  gating downstream depends on this distinction. */
@@ -119,13 +128,14 @@ export async function geocodePlace(
       formatted_address?: string;
       location?: string;
       adcode?: string;
+      citycode?: string;
+      city?: string;
       district?: string;
     }>;
   };
-  const geo = await fetchAmap<GeocodeResp>(AMAP_GEOCODE_URL, {
-    address: query.trim(),
-    city,
-  });
+  const params: Record<string, string> = { address: query.trim() };
+  if (city) params.city = city;
+  const geo = await fetchAmap<GeocodeResp>(AMAP_GEOCODE_URL, params);
   const g = geo?.geocodes?.[0];
   if (g?.location) {
     const coord = parseLocation(g.location);
@@ -136,6 +146,9 @@ export async function geocodePlace(
         address: g.formatted_address,
         coord,
         district: g.district,
+        cityName: typeof g.city === "string" && g.city.trim().length > 0 ? g.city : undefined,
+        cityCode: typeof g.citycode === "string" && g.citycode.trim().length > 0 ? g.citycode : undefined,
+        adcode: typeof g.adcode === "string" && g.adcode.trim().length > 0 ? g.adcode : undefined,
       };
     }
   }
@@ -143,6 +156,46 @@ export async function geocodePlace(
   // Fall back to keyword search.
   const tip = await searchPoiByKeyword(query, city, 1);
   return tip[0] || null;
+}
+
+/**
+ * Lower-level geocode — same as `geocodePlace` but without a Shanghai default
+ * `city` bias. Used by the city resolver when we need Amap to discover the
+ * city from the address string itself (e.g. "西安" or "钟楼 西安").
+ */
+export async function geocodeAddress(
+  query: string,
+  city?: string,
+): Promise<AmapPoi | null> {
+  if (!query || !query.trim()) return null;
+  if (!isAmapConfigured()) return null;
+  type GeocodeResp = {
+    geocodes?: Array<{
+      formatted_address?: string;
+      location?: string;
+      adcode?: string;
+      citycode?: string;
+      city?: string;
+      district?: string;
+    }>;
+  };
+  const params: Record<string, string> = { address: query.trim() };
+  if (city && city.trim()) params.city = city.trim();
+  const geo = await fetchAmap<GeocodeResp>(AMAP_GEOCODE_URL, params);
+  const g = geo?.geocodes?.[0];
+  if (!g?.location) return null;
+  const coord = parseLocation(g.location);
+  if (!coord) return null;
+  return {
+    id: `geo:${query}`,
+    name: query.trim(),
+    address: g.formatted_address,
+    coord,
+    district: g.district,
+    cityName: typeof g.city === "string" && g.city.trim().length > 0 ? g.city : undefined,
+    cityCode: typeof g.citycode === "string" && g.citycode.trim().length > 0 ? g.citycode : undefined,
+    adcode: typeof g.adcode === "string" && g.adcode.trim().length > 0 ? g.adcode : undefined,
+  };
 }
 
 /**
@@ -164,16 +217,22 @@ export async function searchPoiByKeyword(
       location?: string;
       type?: string;
       adname?: string;
+      cityname?: string;
+      citycode?: string;
+      adcode?: string;
     }>;
   };
-  const data = await fetchAmap<PlaceResp>(AMAP_PLACE_TEXT_URL, {
+  const params: Record<string, string> = {
     keywords: keyword.trim(),
-    city,
-    citylimit: "true",
     offset: String(Math.max(1, Math.min(limit, 25))),
     page: "1",
     extensions: "base",
-  });
+  };
+  if (city && city.trim()) {
+    params.city = city.trim();
+    params.citylimit = "true";
+  }
+  const data = await fetchAmap<PlaceResp>(AMAP_PLACE_TEXT_URL, params);
   const pois = data?.pois || [];
   return pois
     .map((p): AmapPoi | null => {
@@ -187,6 +246,9 @@ export async function searchPoiByKeyword(
         coord,
         type: p.type,
         district: p.adname,
+        cityName: typeof p.cityname === "string" && p.cityname.trim().length > 0 ? p.cityname : undefined,
+        cityCode: typeof p.citycode === "string" && p.citycode.trim().length > 0 ? p.citycode : undefined,
+        adcode: typeof p.adcode === "string" && p.adcode.trim().length > 0 ? p.adcode : undefined,
         hasRealId: realId,
       };
     })
@@ -213,6 +275,9 @@ export async function searchPoiNearby(
       location?: string;
       type?: string;
       adname?: string;
+      cityname?: string;
+      citycode?: string;
+      adcode?: string;
     }>;
   };
   const data = await fetchAmap<PlaceResp>(AMAP_PLACE_AROUND_URL, {
@@ -236,6 +301,9 @@ export async function searchPoiNearby(
         coord,
         type: p.type,
         district: p.adname,
+        cityName: typeof p.cityname === "string" && p.cityname.trim().length > 0 ? p.cityname : undefined,
+        cityCode: typeof p.citycode === "string" && p.citycode.trim().length > 0 ? p.citycode : undefined,
+        adcode: typeof p.adcode === "string" && p.adcode.trim().length > 0 ? p.adcode : undefined,
         hasRealId: realId,
       };
     })

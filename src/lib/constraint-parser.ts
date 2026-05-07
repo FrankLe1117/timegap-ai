@@ -147,6 +147,7 @@ export function parseConstraintsRule(userInput: string): ParseResult {
 
   const constraints: Constraints = {
     city: profile.en,
+    city_cn: profile.zh,
     start_location: start || profile.defaultStart,
     start_time: startTime,
     final_destination: end || profile.defaultDest,

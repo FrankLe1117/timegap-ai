@@ -21,6 +21,7 @@ const eslintConfig = defineConfig([
     "scripts/run-smoke-place-sanitize.cjs",
     "scripts/run-smoke-directional-resolve.cjs",
     "scripts/run-smoke-city.cjs",
+    "scripts/run-smoke-amap-resolver.cjs",
   ]),
 ]);
 

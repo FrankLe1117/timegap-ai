@@ -33,13 +33,40 @@ export interface CityGraph {
   edges: CityGraphEdge[];
 }
 
+export interface ResolvedPlace {
+  /** Display name (preferring Amap's normalized POI name when available). */
+  name: string;
+  lng: number;
+  lat: number;
+  /** Amap-resolved city name (e.g. "广州市"). */
+  cityName?: string;
+  cityCode?: string;
+  adcode?: string;
+  district?: string;
+  /** Raw Amap POI type string, when we resolved via place/text. */
+  type?: string;
+  /** Inferred terminal kind for buffer logic. */
+  terminalKind?: "high_speed_rail" | "train" | "domestic_flight" | "international_flight" | "generic";
+  /** "amap_geocode" for geocode/geo, "amap_poi" for place/text, "city_registry" for fallback. */
+  source: "amap_geocode" | "amap_poi" | "city_registry";
+}
+
 export interface Constraints {
   city: string;
+  /** Chinese city name suitable for downstream Amap calls (e.g. "广州").
+   *  When absent, callers should derive it from `city` via cityNameForAmap. */
+  city_cn?: string;
   start_location: string;
   start_time: string;
   final_destination: string;
   departure_time: string;
   recommended_arrival_time?: string;
+  /** Amap-resolved start POI when available. Carries coords + city/adcode so
+   *  downstream candidate-pool / route calls can bias to the correct city
+   *  without relying on the English `city` string. */
+  start_place?: ResolvedPlace;
+  /** Amap-resolved destination POI when available. */
+  destination_place?: ResolvedPlace;
   preferences: string[];
   constraints: string[];
   budget_per_person: number | null;
