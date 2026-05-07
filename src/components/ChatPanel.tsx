@@ -4,10 +4,10 @@ import { useState, useRef, useEffect } from "react";
 import LastDayModePanel from "./LastDayModePanel";
 
 const EXAMPLE_PROMPTS = [
-  "我今天是出差最后一天，11:30在陆家嘴开完会，晚上22:00从虹桥站高铁返程。想吃本地菜再轻度逛一下。",
-  "我下午2点在人民广场结束事情，晚上8点半要到虹桥站。带着行李，不想走太多路。",
-  "今天是旅行最后一天，下午1点从静安寺出发，晚上9点虹桥站出发。今天下雨，找室内为主。",
-  "我中午12点在陆家嘴结束会议，晚上10点从虹桥站走。想体验更本地的上海，但绝对不能误车。",
+  "出差最后一天，11:30 在陆家嘴开完会，22:00 虹桥站高铁返程。想吃本地菜再轻度逛逛。",
+  "下午 2 点在三里屯结束事情，晚上 8 点首都机场起飞。带行李，不想走太多路。",
+  "成都最后一天，下午 1 点从春熙路出发，晚上 9 点成都东站发车。下雨，找室内为主。",
+  "广州出差，中午 12 点在珠江新城收尾，晚上 10 点白云机场起飞。想体验更本地，但绝对不能误车。",
 ];
 
 const QUICK_ACTIONS = [
@@ -87,12 +87,12 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 min-h-0">
         {messages.length === 0 && (
-          <div className="text-center py-8 text-slate-400">
-            <svg className="w-12 h-12 mx-auto mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="text-center py-6 text-slate-500">
+            <svg className="w-10 h-10 mx-auto mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
-            <p className="text-sm">告诉我你最后一天的开始位置和赶车时间</p>
-            <p className="text-xs mt-1 text-slate-400">在「赶车安全边界」内给你最优体验</p>
+            <p className="text-sm text-slate-600">告诉我你的起点、出发车次／航班和偏好</p>
+            <p className="text-[11px] mt-1 text-slate-400">支持国内多数城市，在「赶车安全边界」内给你最优体验</p>
           </div>
         )}
 
@@ -124,7 +124,7 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Last-day mode panel — shown before any chat */}
+      {/* Structured planner panel — shown before any chat */}
       {messages.length === 0 && (
         <div className="px-6 pb-2">
           <LastDayModePanel
@@ -134,27 +134,6 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
             }}
             loading={loading}
           />
-        </div>
-      )}
-
-      {/* Example Prompts */}
-      {showExamples && messages.length === 0 && (
-        <div className="px-6 pb-3">
-          <p className="text-[11px] text-slate-400 mb-2">或者直接描述：</p>
-          <div className="space-y-2">
-            {EXAMPLE_PROMPTS.map((ex, i) => (
-              <button
-                key={i}
-                onClick={() => {
-                  setInput(ex);
-                  setShowExamples(false);
-                }}
-                className="w-full text-left text-xs px-3 py-2 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-lg transition-colors text-slate-600 hover:text-blue-700 line-clamp-2"
-              >
-                {ex}
-              </button>
-            ))}
-          </div>
         </div>
       )}
 
@@ -201,28 +180,63 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
         </div>
       )}
 
-      {/* Input */}
-      <div className="px-6 pb-6 pt-2">
-        <div className="flex gap-2">
-          <input
-            type="text"
+      {/* Input — prominent composer */}
+      <div className="px-6 pb-4 pt-3">
+        {messages.length === 0 && (
+          <p className="text-[11px] text-slate-500 mb-1.5">或者直接用一句话描述：</p>
+        )}
+        <div className="relative rounded-2xl border-2 border-slate-200 bg-white shadow-sm focus-within:border-blue-500 focus-within:shadow-md transition-all">
+          <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
-            placeholder="描述你的空闲时间和偏好..."
-            className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
+            placeholder={
+              messages.length === 0
+                ? "例：下午 2 点在三里屯结束事情，晚上 8 点首都机场起飞，带行李……"
+                : "继续补充：再加一个咖啡馆 / 想换个本地小馆 / 改成更安全……"
+            }
+            rows={messages.length === 0 ? 3 : 2}
+            className="w-full px-4 pt-3 pb-10 bg-transparent rounded-2xl text-sm leading-relaxed resize-none focus:outline-none placeholder:text-slate-400"
             disabled={loading}
           />
           <button
             onClick={() => handleSubmit()}
             disabled={loading || !input.trim()}
-            className="px-4 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="absolute right-2 bottom-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 text-xs font-medium"
+            aria-label="生成方案"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            <span>生成</span>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
             </svg>
           </button>
         </div>
+
+        {/* Example chips — secondary, compact */}
+        {showExamples && messages.length === 0 && (
+          <div className="mt-3">
+            <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1.5">快速示例</p>
+            <div className="flex flex-wrap gap-1.5">
+              {EXAMPLE_PROMPTS.map((ex, i) => (
+                <button
+                  key={i}
+                  onClick={() => {
+                    setInput(ex);
+                  }}
+                  title={ex}
+                  className="text-[11px] px-2.5 py-1 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-full transition-colors text-slate-500 hover:text-blue-700 max-w-full truncate"
+                >
+                  {ex.length > 26 ? ex.slice(0, 26) + "…" : ex}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

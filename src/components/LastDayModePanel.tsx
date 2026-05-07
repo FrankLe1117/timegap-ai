@@ -2,8 +2,25 @@
 
 import { useState } from "react";
 
-const START_OPTIONS = ["陆家嘴", "人民广场", "静安寺", "外滩", "新天地"];
-const DEST_OPTIONS = ["虹桥火车站", "浦东机场", "虹桥机场"];
+const START_OPTIONS = [
+  "陆家嘴",
+  "外滩",
+  "三里屯",
+  "国贸",
+  "春熙路",
+  "天府广场",
+  "珠江新城",
+  "西湖",
+];
+const DEST_OPTIONS = [
+  "虹桥火车站",
+  "浦东机场",
+  "北京南站",
+  "首都机场",
+  "成都东站",
+  "广州南站",
+  "杭州东站",
+];
 
 interface Props {
   onSubmit: (input: string) => void;
@@ -48,9 +65,9 @@ export default function LastDayModePanel({ onSubmit, loading }: Props) {
         className="w-full px-3 py-2 flex items-center justify-between text-xs font-medium text-blue-800 hover:bg-blue-50"
       >
         <span className="flex items-center gap-1.5">
-          <span>✈️</span>
-          最后一天模式
-          <span className="text-[10px] text-blue-500 font-normal">填四个字段，秒出方案</span>
+          <span>🧭</span>
+          <span>尾程规划</span>
+          <span className="text-[10px] text-blue-500 font-normal">起点 · 出发时间 · 偏好，一键生成</span>
         </span>
         <svg
           className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`}
@@ -64,7 +81,7 @@ export default function LastDayModePanel({ onSubmit, loading }: Props) {
         <div className="px-3 pb-3 pt-1 space-y-2.5">
           {/* Start */}
           <div>
-            <p className="text-[11px] text-slate-500 mb-1">现在/结束事情的位置</p>
+            <p className="text-[11px] text-slate-500 mb-1">现在/结束事情的位置（支持国内多数城市）</p>
             <div className="flex flex-wrap gap-1 mb-1">
               {START_OPTIONS.map((opt) => (
                 <button
@@ -84,6 +101,7 @@ export default function LastDayModePanel({ onSubmit, loading }: Props) {
               <input
                 value={start}
                 onChange={(e) => setStart(e.target.value)}
+                placeholder="例：三里屯／春熙路／珠江新城"
                 className="flex-1 text-xs px-2 py-1 border border-slate-200 rounded-md bg-white"
               />
               <input
@@ -117,6 +135,7 @@ export default function LastDayModePanel({ onSubmit, loading }: Props) {
               <input
                 value={dest}
                 onChange={(e) => setDest(e.target.value)}
+                placeholder="例：北京西站／双流机场／萧山机场"
                 className="flex-1 text-xs px-2 py-1 border border-slate-200 rounded-md bg-white"
               />
               <input
@@ -161,7 +180,7 @@ export default function LastDayModePanel({ onSubmit, loading }: Props) {
             disabled={loading}
             className="w-full text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50"
           >
-            生成最后一天方案
+            生成尾程方案
           </button>
         </div>
       )}
