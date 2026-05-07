@@ -5,6 +5,7 @@ import {
 import cityGraph from "@/data/shanghai_city_graph.json";
 import { buildRouteOptions } from "./amap-client";
 import { decideTerminalBuffer } from "./terminal-buffer";
+import { sanitizePlanResponse } from "./place-sanitize";
 
 const { nodes: allNodes, edges: allEdges } = cityGraph as {
   nodes: CityGraphNode[];
@@ -733,7 +734,7 @@ export function planTimeGapTrip(
     ? computeReplanChanges(previousPlans, plans, merged, extraConstraints || {})
     : undefined;
 
-  return {
+  const raw: PlanResponse = {
     parsedConstraints: merged,
     timeBudget,
     plans,
@@ -746,4 +747,9 @@ export function planTimeGapTrip(
       amapConfigured: false,
     },
   };
+
+  // Sanitize synthetic-looking demo stops (e.g. "徐家汇本帮小馆") into
+  // directional suggestions before exposing the response. Real candidate
+  // replacements happen later in the pipeline and bypass this gate.
+  return sanitizePlanResponse(raw, (name) => findNodeByName(name)?.area);
 }

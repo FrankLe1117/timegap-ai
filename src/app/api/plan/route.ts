@@ -5,6 +5,7 @@ import { enrichPlanWithAmap } from "@/lib/amap-enrich";
 import { buildCandidatePool, isPoolUsable } from "@/lib/candidate-pool";
 import { applyCandidatesToPlans } from "@/lib/planner-replace";
 import { geocodePlace, isAmapConfigured } from "@/lib/amap-client";
+import { sanitizePlanResponse } from "@/lib/place-sanitize";
 import { Constraints, Plan } from "@/types";
 
 const FIELD_LABELS: Record<string, string> = {
@@ -114,8 +115,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Final defence-in-depth guard. The planner already sanitizes its raw
+    // output, but enrichment / candidate replacement can mutate timelines, so
+    // we run the same pass on the response that's about to leave the server.
+    // It's idempotent — already-sanitized items pass through unchanged.
+    const sanitized = sanitizePlanResponse(result);
+
     return NextResponse.json({
-      ...result,
+      ...sanitized,
       parseMeta: {
         source: parseResult.source,
         confidence: parseResult.confidence,

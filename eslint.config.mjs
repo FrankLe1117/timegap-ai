@@ -18,6 +18,7 @@ const eslintConfig = defineConfig([
     "scripts/run-smoke.cjs",
     "scripts/run-smoke-zh-time.cjs",
     "scripts/run-smoke-buffer.cjs",
+    "scripts/run-smoke-place-sanitize.cjs",
   ]),
 ]);
 

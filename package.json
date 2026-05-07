@@ -10,7 +10,8 @@
     "smoke:replacement": "node scripts/run-smoke.cjs",
     "smoke:zh-time": "node scripts/run-smoke-zh-time.cjs",
     "smoke:buffer": "node scripts/run-smoke-buffer.cjs",
-    "smoke": "node scripts/run-smoke.cjs && node scripts/run-smoke-zh-time.cjs && node scripts/run-smoke-buffer.cjs"
+    "smoke:place-sanitize": "node scripts/run-smoke-place-sanitize.cjs",
+    "smoke": "node scripts/run-smoke.cjs && node scripts/run-smoke-zh-time.cjs && node scripts/run-smoke-buffer.cjs && node scripts/run-smoke-place-sanitize.cjs"
   },
   "dependencies": {
     "html-to-image": "^1.11.13",

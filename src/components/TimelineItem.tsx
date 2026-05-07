@@ -24,8 +24,37 @@ const activityLabels: Record<string, string> = {
   rest: "休息",
 };
 
+// Tail tokens that indicate a category-style name (e.g. "徐家汇本帮小馆") that
+// almost never resolves to a real POI. Mirrors src/lib/place-sanitize.ts so an
+// unsanitized server response (older clients, bypass paths) still hides the
+// "在高德打开" affordance.
+const SYNTHETIC_NAME_RE =
+  /^.{0,12}(本帮|小馆|餐厅|餐馆|饭馆|食堂|酒楼|小酒馆|酒馆|咖啡店?|咖啡馆|休息点|快餐区|周边日料|日料|小吃|茶馆|书吧|简餐|商务简餐|本帮简餐|本帮菜|本帮菜餐厅|老字号餐厅|晚餐|午餐|早餐)$/u;
+
+const hasTrustedCoords = (item: TimelineItemType): boolean => {
+  return item.lng != null && item.lat != null;
+};
+
+const isUnverifiedSyntheticName = (item: TimelineItemType): boolean => {
+  if (!item.place_name) return false;
+  // Real-candidate stops with a non-suggested reliability are always trusted.
+  if (item.source && item.source !== "demo" && item.candidate_reliability !== "suggested") {
+    return false;
+  }
+  return SYNTHETIC_NAME_RE.test(item.place_name);
+};
+
 const hasNavablePlace = (item: TimelineItemType): boolean => {
-  return !["transport", "station_buffer"].includes(item.activity_type) && !!item.place_name;
+  if (["transport", "station_buffer"].includes(item.activity_type)) return false;
+  if (!item.place_name) return false;
+  // Directional suggestions never get a map link — they are not POIs.
+  if (item.place_kind === "directional") return false;
+  // Belt-and-braces: even if the server forgot to mark a stop as directional,
+  // refuse to render a map link for an unverified synthetic-style name.
+  if (isUnverifiedSyntheticName(item)) return false;
+  // Demo stops without coords and without an amap_url have nothing to point at.
+  if (!item.amap_url && !hasTrustedCoords(item)) return false;
+  return true;
 };
 
 const isTransportLeg = (item: TimelineItemType): boolean => item.activity_type === "transport";
@@ -101,6 +130,13 @@ export default function TimelineItem({ item, isLast }: { item: TimelineItemType;
               在高德打开
             </button>
           )}
+          {!hasNavablePlace(item)
+            && !["transport", "station_buffer"].includes(item.activity_type)
+            && (item.place_kind === "directional" || isUnverifiedSyntheticName(item)) && (
+              <p className="mt-1.5 text-[11px] text-slate-400">
+                方向建议，未绑定具体地点
+              </p>
+            )}
           {isTransportLeg(item) && item.route_options && item.route_options.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1.5" data-export-ignore="true">
               {item.route_options.map((opt) => (

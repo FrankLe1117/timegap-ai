@@ -112,6 +112,13 @@ export interface TimelineItem {
    *  UI to choose between a "高德已验证" badge (confirmed) and a softer
    *  "高德候选" badge (probable). Absent for demo stops. */
   candidate_reliability?: "confirmed" | "probable" | "suggested";
+  /**
+   * Whether this stop refers to a concrete POI we trust enough to navigate to,
+   * or a directional suggestion ("徐汇区附近一家本帮菜小馆") that the UI must
+   * NOT decorate with a map link. Absent → treated as "poi" for backwards
+   * compatibility.
+   */
+  place_kind?: "poi" | "directional";
 }
 
 export interface SuitabilityTags {
