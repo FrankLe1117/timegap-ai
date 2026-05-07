@@ -28,7 +28,7 @@ export function buildExportFilename(plan: Plan, now: Date = new Date()): string 
   const dd = pad2(now.getDate());
   const hh = pad2(now.getHours());
   const mi = pad2(now.getMinutes());
-  return `timegap-plan-${plan.plan_type}-${yyyy}${mm}${dd}-${hh}${mi}.png`;
+  return `last-stop-plan-${plan.plan_type}-${yyyy}${mm}${dd}-${hh}${mi}.png`;
 }
 
 /**

@@ -117,8 +117,8 @@ export default function TimelineItem({ item, isLast }: { item: TimelineItemType;
                 e.stopPropagation();
                 const url = item.amap_url
                   || (item.lng != null && item.lat != null
-                    ? `https://uri.amap.com/marker?position=${item.lng},${item.lat}&name=${encodeURIComponent(item.place_name)}&src=TimeGap%20AI&coordinate=gaode&callnative=1`
-                    : `https://uri.amap.com/search?keyword=${encodeURIComponent(item.place_name)}&city=${encodeURIComponent("上海")}&src=TimeGap%20AI`);
+                    ? `https://uri.amap.com/marker?position=${item.lng},${item.lat}&name=${encodeURIComponent(item.place_name)}&src=${encodeURIComponent("Last Stop 尾程")}&coordinate=gaode&callnative=1`
+                    : `https://uri.amap.com/search?keyword=${encodeURIComponent(item.place_name)}&city=${encodeURIComponent("上海")}&src=${encodeURIComponent("Last Stop 尾程")}`);
                 window.open(url, "_blank");
               }}
               className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 transition-colors"

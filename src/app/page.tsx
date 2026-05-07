@@ -159,8 +159,8 @@ export default function Home() {
               </svg>
             </div>
             <div>
-              <span className="text-sm font-semibold text-slate-900">TimeGap AI</span>
-              <span className="ml-2 text-[11px] text-slate-400">出差/旅行最后一天 · AI 理解 + 高德路线（可选） / 演示城市图</span>
+              <span className="text-sm font-semibold text-slate-900">Last Stop 尾程</span>
+              <span className="ml-2 text-[11px] text-slate-400">离城前的最后几小时 · AI 理解 + 高德路线（可选） / 演示城市图</span>
               {planData && (
                 <>
                   <span className="ml-3 text-xs text-slate-400">

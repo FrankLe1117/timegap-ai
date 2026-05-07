@@ -284,7 +284,7 @@ export default function PlanCard({ plan, selected, onSelect }: PlanCardProps) {
             <div className="px-4 py-2 bg-amber-50/70 border-t border-amber-100 text-[11px] text-amber-700 flex items-start gap-1.5">
               <span>📷</span>
               <span>
-                图片中的地图/高德链接无法点击，请回到 TimeGap AI 应用内打开路线。
+                图片中的地图/高德链接无法点击，请回到 Last Stop 尾程 应用内打开路线。
                 生成时间：{new Date().toLocaleString("zh-CN", { hour12: false })}
               </span>
             </div>

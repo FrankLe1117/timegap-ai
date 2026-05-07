@@ -78,8 +78,8 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
             </svg>
           </div>
           <div>
-            <h1 className="text-base font-semibold text-slate-900">TimeGap AI</h1>
-            <p className="text-[11px] text-slate-400">出差/旅行最后一天行程规划助手</p>
+            <h1 className="text-base font-semibold text-slate-900">Last Stop 尾程</h1>
+            <p className="text-[11px] text-slate-400">离城前的最后几小时，安排得刚刚好。</p>
           </div>
         </div>
       </div>

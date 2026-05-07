@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TimeGap AI · 出差/旅行最后一天行程规划助手",
-  description: "在赶车安全边界内，给你最后一天的最优体验：理解时间约束、晚高峰风险与本地偏好。",
+  title: "Last Stop 尾程 · 离城前的最后几小时，安排得刚刚好。",
+  description: "退房后到出发前，把餐厅、景点、交通和安全缓冲放在同一张时间表里。",
 };
 
 export default function RootLayout({

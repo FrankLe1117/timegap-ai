@@ -309,7 +309,7 @@ export async function estimateRoute(
  * opens both the web map and the mobile app reliably. Otherwise we fall back
  * to a keyword search URL.
  */
-export function buildAmapMarkerUrl(name: string, coord?: AmapCoord, srcAppName = "TimeGap AI"): string {
+export function buildAmapMarkerUrl(name: string, coord?: AmapCoord, srcAppName = "Last Stop 尾程"): string {
   if (coord) {
     const params = new URLSearchParams({
       position: `${coord.lng},${coord.lat}`,
@@ -330,7 +330,7 @@ export function buildAmapSearchUrl(keyword: string, city = "上海"): string {
   const params = new URLSearchParams({
     keyword,
     city,
-    src: "TimeGap AI",
+    src: "Last Stop 尾程",
     callnative: "1",
   });
   return `https://uri.amap.com/search?${params.toString()}`;
@@ -356,7 +356,7 @@ export function buildAmapNavigationUrl(
     tocoord: `${to.lng},${to.lat}`,
     toname: toName,
     mode: modeMap[mode],
-    src: "TimeGap AI",
+    src: "Last Stop 尾程",
     callnative: "1",
   });
   return `https://uri.amap.com/navigation?${params.toString()}`;
@@ -379,7 +379,7 @@ export function buildAmapRouteByNameUrl(
     from: `${fromName},${city}`,
     to: `${toName},${city}`,
     type: tMap[mode],
-    src: "TimeGap AI",
+    src: "Last Stop 尾程",
     callnative: "1",
   });
   return `https://uri.amap.com/route?${params.toString()}`;
