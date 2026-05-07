@@ -70,7 +70,15 @@ function getTravelTime(fromName: string, toName: string, departureTimeMin: numbe
 
 export function calculateTimeBudget(constraints: Constraints): TimeBudget {
   const startMin = timeToMin(constraints.start_time);
-  const departMin = timeToMin(constraints.departure_time);
+  let departMin = timeToMin(constraints.departure_time);
+
+  // Same-day window guard: if depart < start, treat as a parsing miss rather
+  // than silently crossing midnight (which used to balloon "01:30→21:30" into
+  // a ~20h window). We assume both times are on the same day; if a real
+  // overnight gap exists, the user phrases it explicitly elsewhere.
+  if (departMin <= startMin) {
+    departMin = startMin + 60;
+  }
 
   const isAirport = constraints.final_destination.includes("机场") ||
     constraints.final_destination.toLowerCase().includes("airport");

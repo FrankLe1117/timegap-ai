@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "smoke:replacement": "node scripts/run-smoke.cjs"
+    "smoke:replacement": "node scripts/run-smoke.cjs",
+    "smoke:zh-time": "node scripts/run-smoke-zh-time.cjs",
+    "smoke": "node scripts/run-smoke.cjs && node scripts/run-smoke-zh-time.cjs"
   },
   "dependencies": {
     "next": "16.2.4",

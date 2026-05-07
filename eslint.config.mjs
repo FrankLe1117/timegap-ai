@@ -16,6 +16,7 @@ const eslintConfig = defineConfig([
     // shipped Next.js bundle.
     ".smoke-build/**",
     "scripts/run-smoke.cjs",
+    "scripts/run-smoke-zh-time.cjs",
   ]),
 ]);
 

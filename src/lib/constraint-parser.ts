@@ -1,4 +1,5 @@
 import { Constraints, ParseResult } from "@/types";
+import { parseChineseTimeAll } from "./zh-time";
 
 const locationMap: Record<string, { id: string; name: string }> = {
   "陆家嘴": { id: "lujiazui", name: "陆家嘴" },
@@ -16,26 +17,46 @@ const locationMap: Record<string, { id: string; name: string }> = {
   "南京路": { id: "nanjing_road", name: "南京路步行街" },
 };
 
-function extractTime(text: string, context: "start" | "end"): string | null {
-  const match = text.match(/(\d{1,2})[::：](\d{2})/);
-  if (match) {
-    let h = parseInt(match[1]);
-    const m = match[2];
-    if (context === "end" && h < 12) {
-      if (text.includes("晚上") || text.includes("夜")) h += 12;
-    }
-    return `${h.toString().padStart(2, "0")}:${m}`;
+/**
+ * Pick start and end times from the user's free-form Chinese input.
+ *
+ * Strategy:
+ *   1. Find every time mention with its character offset.
+ *   2. For each mention, classify it as start-leaning or end-leaning by
+ *      looking at the surrounding clause for departure/leave keywords.
+ *   3. If we still can't tell, fall back to "first = start, last = end".
+ */
+function extractStartEndTimes(text: string): { start: string | null; end: string | null } {
+  const hits = parseChineseTimeAll(text);
+  if (hits.length === 0) return { start: null, end: null };
+  if (hits.length === 1) return { start: hits[0].time, end: null };
+
+  // Look at the clause around each hit to classify intent.
+  const clauseFor = (i: number): string => {
+    const left = text.slice(0, i).split(/[，。；,;\n]/).pop() || "";
+    const right = text.slice(i).split(/[，。；,;\n]/)[0] || "";
+    return left + right;
+  };
+
+  const startKeyword = /出发|开始|结束|开完|完成|办完|空(下来|出来)?|有空|空档|落地|到达|抵达|开会/;
+  const endKeyword = /出发|离开|坐.{0,4}(车|高铁|火车|飞机|动车|地铁)|高铁|火车|飞机|动车|起飞|赶车|车次|航班|返程|登机|检票/;
+
+  let startIdx = -1;
+  let endIdx = -1;
+  for (let i = 0; i < hits.length; i++) {
+    const c = clauseFor(hits[i].index);
+    const isEnd = endKeyword.test(c) && /(出发|离开|高铁|火车|飞机|动车|起飞|赶车|车次|航班|返程|登机|检票)/.test(c);
+    const isStart = startKeyword.test(c) && !isEnd;
+    if (isStart && startIdx === -1) startIdx = i;
+    if (isEnd) endIdx = i;
   }
 
-  const hourOnly = text.match(/(\d{1,2})点半?/);
-  if (hourOnly) {
-    let h = parseInt(hourOnly[1]);
-    if (context === "end" && text.includes("晚") && h < 12) h += 12;
-    if (context === "end" && text.includes("下午") && h < 12) h += 12;
-    return `${h.toString().padStart(2, "0")}:30`;
-  }
+  // Fallbacks: first/last in document order.
+  if (startIdx === -1) startIdx = 0;
+  if (endIdx === -1 || endIdx === startIdx) endIdx = hits.length - 1;
+  if (endIdx === startIdx) return { start: hits[startIdx].time, end: null };
 
-  return null;
+  return { start: hits[startIdx].time, end: hits[endIdx].time };
 }
 
 function extractLocations(text: string): { start: string | null; end: string | null } {
@@ -89,16 +110,7 @@ export function parseConstraintsRule(userInput: string): ParseResult {
   const isLuggage = userInput.includes("行李") || userInput.includes("箱子");
   const isRainy = userInput.includes("下雨") || userInput.includes("雨天");
 
-  const sentences = userInput.split(/[，。；,;]/);
-  let startTimeText = userInput;
-  let endTimeText = userInput;
-  for (const s of sentences) {
-    if (s.match(/开完|结束|完成|办完/)) startTimeText = s;
-    if (s.match(/出发|离开|坐.*车|高铁|火车|飞机|动车/)) endTimeText = s;
-  }
-
-  const rawStartTime = extractTime(startTimeText, "start");
-  const rawEndTime = extractTime(endTimeText, "end");
+  const { start: rawStartTime, end: rawEndTime } = extractStartEndTimes(userInput);
 
   const missing: string[] = [];
   const assumptions: string[] = [];

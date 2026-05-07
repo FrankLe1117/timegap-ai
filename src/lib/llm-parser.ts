@@ -1,5 +1,6 @@
 import { Constraints, ParseResult } from "@/types";
 import { parseConstraintsRule } from "./constraint-parser";
+import { reconcileTimeWithText } from "./zh-time";
 
 const SYSTEM_PROMPT = `你是上海空档时间规划助手的输入解析器。用户用自然语言描述一段空闲时间和偏好，你需要把它解析成结构化 JSON。
 
@@ -104,8 +105,11 @@ function buildResultFromLlm(json: LlmJson, userInput: string): ParseResult {
 
   const startLoc = json.start_location && json.start_location.trim() ? json.start_location.trim() : "";
   const endLoc = json.final_destination && json.final_destination.trim() ? json.final_destination.trim() : "";
-  const startTime = pad(json.start_time);
-  const endTime = pad(json.departure_time);
+  // Reconcile the LLM's HH:MM with the original text. The LLM occasionally
+  // drops the meridiem (returning "01:00" for "下午1点"); the deterministic
+  // Chinese parser owns the final say when the user wrote a clear meridiem.
+  const startTime = reconcileTimeWithText(pad(json.start_time), userInput, "start") ?? "";
+  const endTime = reconcileTimeWithText(pad(json.departure_time), userInput, "end") ?? "";
 
   const missing = new Set<string>(json.missing || []);
   const assumptions: string[] = [];
