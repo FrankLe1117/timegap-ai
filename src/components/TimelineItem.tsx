@@ -44,7 +44,14 @@ export default function TimelineItem({ item, isLast }: { item: TimelineItemType;
           <span className="text-[11px] text-slate-400">{activityLabels[item.activity_type] || ""}</span>
         </div>
         <div className={`px-3 py-2 rounded-lg border ${activityColors[item.activity_type] || "border-slate-200 bg-white"}`}>
-          <p className="text-sm font-medium text-slate-800">{item.title}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-sm font-medium text-slate-800">{item.title}</p>
+            {item.source && item.source !== "demo" && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200">
+                {item.source === "amap" ? "高德" : "美团"}
+              </span>
+            )}
+          </div>
           {item.reason && (
             <p className="text-xs text-slate-500 mt-0.5">{item.reason}</p>
           )}

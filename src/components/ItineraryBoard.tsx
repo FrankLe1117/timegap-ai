@@ -17,10 +17,14 @@ function DataSourceIndicator({ data }: { data: PlanResponse }) {
   let label = "演示城市图 · 规则兜底";
   let dotClass = "bg-purple-400";
   if (rs === "amap") {
-    label = "高德路线估算 · 实时 POI/地理编码";
+    label = ds.candidatesUsed
+      ? "高德候选点 + 高德路线"
+      : "高德路线估算 · 实时 POI/地理编码";
     dotClass = "bg-emerald-500";
   } else if (rs === "mixed") {
-    label = "高德路线（部分） + 演示城市图回退";
+    label = ds.candidatesUsed
+      ? "高德候选点 + 高德/演示混合路线"
+      : "高德路线（部分） + 演示城市图回退";
     dotClass = "bg-amber-400";
   } else if (!ds.amapConfigured) {
     label = "演示城市图（未配置 AMAP_API_KEY）";

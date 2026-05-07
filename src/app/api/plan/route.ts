@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { parseConstraintsSmart } from "@/lib/llm-parser";
 import { planTimeGapTrip } from "@/lib/planner";
 import { enrichPlanWithAmap } from "@/lib/amap-enrich";
+import { buildCandidatePool, isPoolUsable } from "@/lib/candidate-pool";
+import { applyCandidatesToPlans } from "@/lib/planner-replace";
+import { geocodePlace, isAmapConfigured } from "@/lib/amap-client";
 import { Constraints, Plan } from "@/types";
 
 const FIELD_LABELS: Record<string, string> = {
@@ -66,6 +69,44 @@ export async function POST(request: NextRequest) {
       result = await enrichPlanWithAmap(baseResult);
     } catch (err) {
       console.warn("[plan] Amap enrichment failed, falling back:", err);
+    }
+
+    // Candidate-pool replacement: when AMAP_API_KEY is configured, try to
+    // replace demo stops with real candidates and rerank. On any failure or
+    // empty pool, this returns the input unchanged.
+    if (isAmapConfigured()) {
+      try {
+        const [startPoi, destPoi] = await Promise.all([
+          geocodePlace(parseResult.constraints.start_location),
+          geocodePlace(parseResult.constraints.final_destination),
+        ]);
+        const pool = await buildCandidatePool(parseResult.constraints, {
+          startCoord: startPoi?.coord ?? null,
+          destCoord: destPoi?.coord ?? null,
+        });
+        if (isPoolUsable(pool)) {
+          const replaced = await applyCandidatesToPlans(result, pool, {
+            startCoord: startPoi?.coord ?? null,
+            destCoord: destPoi?.coord ?? null,
+          });
+          result = replaced.response;
+          // If we used candidates, surface that in the data-sources line.
+          if (replaced.replacedTotal > 0) {
+            result = {
+              ...result,
+              dataSources: {
+                ...result.dataSources,
+                places:
+                  "高德候选点（POI/地理编码）+ 演示城市地点库（兜底）",
+                apiReady:
+                  "已接入高德 Web Service（路线/POI/地理编码 + 候选点替换），未接入点评/美团",
+              },
+            };
+          }
+        }
+      } catch (err) {
+        console.warn("[plan] Candidate-pool replacement failed, keeping enriched plan:", err);
+      }
     }
 
     return NextResponse.json({

@@ -77,6 +77,10 @@ export interface TimelineItem {
   lat?: number;
   /** Optional Amap-built navigation URL. */
   amap_url?: string;
+  /** Where the place came from. Demo (city graph) is the default. */
+  source?: "demo" | "amap" | "meituan";
+  /** [0,1] candidate score when the stop was inserted from a real candidate pool. */
+  candidate_score?: number;
 }
 
 export interface SuitabilityTags {
@@ -154,6 +158,10 @@ export interface PlanResponse {
     /** Stable tag for UI: "amap" when Amap routes were used, "demo" otherwise, "mixed" when partial. */
     routesSource: "amap" | "demo" | "mixed" | "fallback";
     amapConfigured: boolean;
+    /** True when at least one stop was sourced from a real candidate pool. */
+    candidatesUsed?: boolean;
+    /** Distinct candidate sources represented in plans, e.g. ["amap"]. */
+    candidateSources?: Array<"amap" | "meituan">;
   };
 }
 
