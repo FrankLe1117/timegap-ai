@@ -6,6 +6,7 @@ import { buildCandidatePool, isPoolUsable } from "@/lib/candidate-pool";
 import { applyCandidatesToPlans } from "@/lib/planner-replace";
 import { geocodePlace, isAmapConfigured } from "@/lib/amap-client";
 import { sanitizePlanResponse } from "@/lib/place-sanitize";
+import { resolveDirectionalSuggestions } from "@/lib/directional-resolver";
 import { Constraints, Plan } from "@/types";
 
 const FIELD_LABELS: Record<string, string> = {
@@ -80,12 +81,14 @@ export async function POST(request: NextRequest) {
     // Candidate-pool replacement: when AMAP_API_KEY is configured, try to
     // replace demo stops with real candidates and rerank. On any failure or
     // empty pool, this returns the input unchanged.
+    let startCoord: { lng: number; lat: number } | null = null;
     if (isAmapConfigured()) {
       try {
         const [startPoi, destPoi] = await Promise.all([
           geocodePlace(parseResult.constraints.start_location),
           geocodePlace(parseResult.constraints.final_destination),
         ]);
+        startCoord = startPoi?.coord ?? null;
         const pool = await buildCandidatePool(parseResult.constraints, {
           startCoord: startPoi?.coord ?? null,
           destCoord: destPoi?.coord ?? null,
@@ -119,7 +122,22 @@ export async function POST(request: NextRequest) {
     // output, but enrichment / candidate replacement can mutate timelines, so
     // we run the same pass on the response that's about to leave the server.
     // It's idempotent — already-sanitized items pass through unchanged.
-    const sanitized = sanitizePlanResponse(result);
+    let sanitized = sanitizePlanResponse(result);
+
+    // Last-mile upgrade: any directional suggestion left after sanitization
+    // (e.g. "黄浦区附近找一家老字号餐厅小馆") gets one more chance to resolve
+    // into a concrete Amap POI. When the search returns a reliable POI, the
+    // stop gains coords / amap_url; otherwise it stays directional.
+    if (isAmapConfigured()) {
+      try {
+        const resolved = await resolveDirectionalSuggestions(sanitized, {
+          startCoord,
+        });
+        sanitized = resolved.response;
+      } catch (err) {
+        console.warn("[plan] Directional resolution failed, keeping suggestions:", err);
+      }
+    }
 
     return NextResponse.json({
       ...sanitized,

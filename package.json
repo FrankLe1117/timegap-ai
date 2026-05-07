@@ -11,7 +11,8 @@
     "smoke:zh-time": "node scripts/run-smoke-zh-time.cjs",
     "smoke:buffer": "node scripts/run-smoke-buffer.cjs",
     "smoke:place-sanitize": "node scripts/run-smoke-place-sanitize.cjs",
-    "smoke": "node scripts/run-smoke.cjs && node scripts/run-smoke-zh-time.cjs && node scripts/run-smoke-buffer.cjs && node scripts/run-smoke-place-sanitize.cjs"
+    "smoke:directional": "node scripts/run-smoke-directional-resolve.cjs",
+    "smoke": "node scripts/run-smoke.cjs && node scripts/run-smoke-zh-time.cjs && node scripts/run-smoke-buffer.cjs && node scripts/run-smoke-place-sanitize.cjs && node scripts/run-smoke-directional-resolve.cjs"
   },
   "dependencies": {
     "html-to-image": "^1.11.13",
