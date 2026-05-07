@@ -1,6 +1,7 @@
 import { Constraints, ParseResult } from "@/types";
 import { parseChineseTimeAll } from "./zh-time";
 import { detectCity, locateInCity, CityProfile } from "./city-detect";
+import { topLocalCuisinesFor } from "./city-cuisine";
 
 /**
  * Pick start and end times from the user's free-form Chinese input.
@@ -129,17 +130,23 @@ export function parseConstraintsRule(userInput: string): ParseResult {
   const budget = budgetMatch ? parseInt(budgetMatch[1]) : null;
 
   const foodPrefs: string[] = [];
+  // Explicit cuisine in user text — preserved verbatim. Honoring 本帮菜 here
+  // even outside Shanghai is intentional (req 4): if the user types it, the
+  // downstream resolver will search 本帮菜 first, then broaden if nothing
+  // local turns up.
   if (userInput.match(/本帮|上海菜/)) foodPrefs.push("本帮菜");
   if (userInput.match(/小吃/)) foodPrefs.push("小吃");
-  if (userInput.match(/粤菜|早茶/)) foodPrefs.push("粤菜");
-  if (userInput.match(/川菜|火锅/)) foodPrefs.push("川菜");
+  if (userInput.match(/粤菜|早茶|茶餐厅|烧腊|顺德/)) foodPrefs.push("粤菜");
+  if (userInput.match(/川菜|火锅|串串/)) foodPrefs.push("川菜");
+  if (userInput.match(/陕菜|肉夹馍|凉皮|羊肉泡馍/)) foodPrefs.push("陕菜");
+  if (userInput.match(/烤鸭/)) foodPrefs.push("北京菜");
+  if (userInput.match(/杭帮/)) foodPrefs.push("杭帮菜");
   if (foodPrefs.length === 0 && preferences.includes("local_food")) {
-    // Default to a city-appropriate local cuisine hint instead of Shanghainese
-    // for every city.
-    if (profile.key === "shanghai") foodPrefs.push("本帮菜");
-    else if (profile.key === "guangzhou") foodPrefs.push("粤菜");
-    else if (profile.key === "chengdu" || profile.key === "chongqing") foodPrefs.push("川菜");
-    else foodPrefs.push("本地菜");
+    // City-aware default: pull the city's top local cuisines instead of
+    // hardcoding 本帮菜 for every city. Falls back to "本地特色" for
+    // unknown cities.
+    const local = topLocalCuisinesFor(profile.zh, 2);
+    foodPrefs.push(...local);
   }
 
   let walkPref: Constraints["walking_preference"] = "medium";

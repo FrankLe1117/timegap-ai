@@ -20,6 +20,12 @@ import {
 import { Constraints } from "@/types";
 import { searchMeituanDeals, isMeituanConfigured } from "./meituan-client";
 import { cityNameForAmap } from "./city-detect";
+import {
+  foreignBrandPenalty,
+  localCuisineBoost,
+  looksForeignBrand,
+  topLocalCuisinesFor,
+} from "./city-cuisine";
 
 export type CandidateCategory =
   | "restaurant"
@@ -92,9 +98,12 @@ const EMPTY_POOL: CandidatePool = {
   sources: [],
 };
 
+/**
+ * Preference → cuisine keyword hints. `local_food` / `shanghainese` are
+ * handled separately (city-aware) inside `preferenceFoodKeywords` so they
+ * never inject Shanghai cuisine into a non-Shanghai plan.
+ */
 const FOOD_KEYWORD_HINTS: Record<string, string[]> = {
-  local_food: ["本帮菜", "上海菜", "小笼", "生煎"],
-  shanghainese: ["本帮菜", "上海老味道"],
   vegetarian: ["素食"],
   spicy: ["川菜", "湘菜"],
   light: ["简餐", "轻食"],
@@ -291,6 +300,7 @@ function poiToCandidate(
   baseScore: number,
   source: CandidateSource,
   anchors: AnchorOpts,
+  cityLabel?: string | null,
 ): Candidate {
   const { reliability, confidence, allow_in_itinerary } = classifyReliability(
     poi,
@@ -299,7 +309,12 @@ function poiToCandidate(
   );
   // Penalize the heuristic score by confidence so unreliable candidates can
   // never out-rank a confirmed one of the same category.
-  const score = Math.max(0, Math.min(1, baseScore)) * (0.6 + confidence * 0.4);
+  let score = Math.max(0, Math.min(1, baseScore)) * (0.6 + confidence * 0.4);
+  if (category === "restaurant" || category === "station_friendly") {
+    score += localCuisineBoost(poi.name, poi.type, cityLabel);
+    score -= foreignBrandPenalty(poi.name, cityLabel);
+  }
+  score = Math.max(0, Math.min(1, score));
   return {
     id: `${source}:${poi.id}`,
     name: poi.name,
@@ -318,19 +333,61 @@ function poiToCandidate(
   };
 }
 
+/**
+ * Build the keyword list passed to Amap restaurant search.
+ *
+ * Rules:
+ * - User-explicit `food_preference` entries are ALWAYS honored verbatim (e.g.
+ *   "本帮菜" in Guangzhou is respected — we'll search 本帮菜 in 广州 too).
+ * - Generic `local_food` / `shanghainese` preferences expand to the *current*
+ *   city's local cuisine list, NOT to 本帮菜 by default. This is the fix for
+ *   the previous bug where Guangzhou + "更本地" pulled 本帮菜 results.
+ * - Non-food preference hints (`vegetarian`/`spicy`/...) flow through as-is.
+ * - When nothing food-related is set, fall back to the city's local cuisines
+ *   so the user always gets *something* city-appropriate, not Shanghai.
+ */
 function preferenceFoodKeywords(constraints: Constraints): string[] {
-  const out = new Set<string>();
-  for (const p of constraints.preferences) {
-    const hints = FOOD_KEYWORD_HINTS[p];
-    if (hints) hints.forEach((h) => out.add(h));
-  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (kw: string | undefined | null) => {
+    const t = (kw || "").trim();
+    if (!t || seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+
+  const cityLabel = constraints.city_cn || constraints.city;
+  const localCuisines = topLocalCuisinesFor(cityLabel, 3);
+
+  // 1. Explicit food preferences — verbatim.
   for (const f of constraints.food_preference || []) {
+    if (!f) continue;
+    if (f === "local_food" || f === "shanghainese") {
+      // Generic markers — expand to city-local cuisines.
+      localCuisines.forEach(push);
+      continue;
+    }
     const hints = FOOD_KEYWORD_HINTS[f];
-    if (hints) hints.forEach((h) => out.add(h));
-    else out.add(f);
+    if (hints) hints.forEach(push);
+    else push(f);
   }
-  if (out.size === 0) out.add("本帮菜");
-  return Array.from(out).slice(0, 3);
+
+  // 2. Generic preferences — only the local-food ones depend on city.
+  for (const p of constraints.preferences) {
+    if (p === "local_food" || p === "shanghainese") {
+      localCuisines.forEach(push);
+      continue;
+    }
+    const hints = FOOD_KEYWORD_HINTS[p];
+    if (hints) hints.forEach(push);
+  }
+
+  // 3. Empty fallback — never default to 本帮菜 in non-Shanghai cities.
+  if (out.length === 0) {
+    localCuisines.forEach(push);
+  }
+
+  return out.slice(0, 3);
 }
 
 function rankPois(pois: AmapPoi[], preferred: AmapCoord | null): AmapPoi[] {
@@ -341,6 +398,30 @@ function rankPois(pois: AmapPoi[], preferred: AmapCoord | null): AmapPoi[] {
     return dx * dx + dy * dy;
   };
   return [...pois].sort((a, b) => dist(a) - dist(b));
+}
+
+/**
+ * Drop candidates whose name looks like a foreign-brand chain (e.g. "沪上阿姨"
+ * in Guangzhou) when at least one non-foreign alternative remains. If every
+ * candidate is foreign-branded we keep them — better some result than nothing.
+ *
+ * Why filter rather than just penalize: even a heavy score penalty can let a
+ * foreign brand land at rank 2-3 when the city-local pool is small, and that
+ * still pollutes the user-visible plan.
+ */
+function filterForeignBrandsWhenAlternativesExist(
+  candidates: Candidate[],
+  cityLabel: string | undefined | null,
+): Candidate[] {
+  if (!candidates.length) return candidates;
+  const foreign: Candidate[] = [];
+  const native: Candidate[] = [];
+  for (const c of candidates) {
+    if (looksForeignBrand(c.name, cityLabel)) foreign.push(c);
+    else native.push(c);
+  }
+  if (native.length > 0) return native;
+  return candidates;
 }
 
 interface BuildOptions {
@@ -426,6 +507,7 @@ export async function buildCandidatePool(
           0.7 - i * 0.03,
           "meituan",
           anchors,
+          city,
         ),
       );
     } catch {
@@ -435,28 +517,36 @@ export async function buildCandidatePool(
 
   const restaurantsRaw = restaurantPoisByKw
     .flat()
-    .map((p, i) => poiToCandidate(p, "restaurant", 0.85 - i * 0.02, "amap", anchors));
-  const restaurants = dedupe([...restaurantsRaw, ...meituanRestaurants]);
+    .map((p, i) => poiToCandidate(p, "restaurant", 0.85 - i * 0.02, "amap", anchors, city));
+  // City-aware filter: when foreign-brand candidates exist alongside local
+  // ones, drop the foreign-brand entries entirely so they don't show up at
+  // all (penalty alone may not be enough when the local pool is sparse).
+  const filteredRestaurants = filterForeignBrandsWhenAlternativesExist(
+    [...restaurantsRaw, ...meituanRestaurants],
+    city,
+  );
+  const restaurants = dedupe(filteredRestaurants);
 
   const cafes = dedupe(
     rankPois(cafePois, start).map((p, i) =>
-      poiToCandidate(p, "cafe", 0.8 - i * 0.04, "amap", anchors),
+      poiToCandidate(p, "cafe", 0.8 - i * 0.04, "amap", anchors, city),
     ),
   );
   const scenic = dedupe(
     rankPois(scenicPois, start).map((p, i) =>
-      poiToCandidate(p, "scenic", 0.75 - i * 0.04, "amap", anchors),
+      poiToCandidate(p, "scenic", 0.75 - i * 0.04, "amap", anchors, city),
     ),
   );
   const indoor = dedupe(
     rankPois(indoorPois, start).map((p, i) =>
-      poiToCandidate(p, "indoor", 0.7 - i * 0.04, "amap", anchors),
+      poiToCandidate(p, "indoor", 0.7 - i * 0.04, "amap", anchors, city),
     ),
   );
+  const stationRaw = rankPois(stationRestaurantPois, dest).map((p, i) =>
+    poiToCandidate(p, "station_friendly", 0.85 - i * 0.04, "amap", anchors, city),
+  );
   const stationFriendly = dedupe(
-    rankPois(stationRestaurantPois, dest).map((p, i) =>
-      poiToCandidate(p, "station_friendly", 0.85 - i * 0.04, "amap", anchors),
-    ),
+    filterForeignBrandsWhenAlternativesExist(stationRaw, city),
   );
 
   const byCategory = {

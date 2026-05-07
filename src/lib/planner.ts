@@ -6,6 +6,7 @@ import cityGraph from "@/data/shanghai_city_graph.json";
 import { buildRouteOptions } from "./amap-client";
 import { decideTerminalBuffer } from "./terminal-buffer";
 import { sanitizePlanResponse } from "./place-sanitize";
+import { resolveCityKey, topLocalCuisinesFor } from "./city-cuisine";
 
 const { nodes: allNodes, edges: allEdges } = cityGraph as {
   nodes: CityGraphNode[];
@@ -132,10 +133,26 @@ export function calculateTimeBudget(
   };
 }
 
+/**
+ * True when the constraints describe a Shanghai trip (the only city the demo
+ * graph actually covers). Non-Shanghai trips must NOT pull stops from the
+ * Shanghai demo nodes — that's the bug that made Guangzhou plans surface
+ * 沪上鲜师 / 新天地 etc. as if they were local picks.
+ */
+function isShanghaiConstraint(constraints: Constraints): boolean {
+  const cityLabel = constraints.city_cn || constraints.city || "";
+  return resolveCityKey(cityLabel) === "shanghai";
+}
+
 function filterNodes(
   constraints: Constraints,
   type?: CityGraphNode["type"]
 ): CityGraphNode[] {
+  // Demo graph is Shanghai-only. Don't seed plans for other cities from it —
+  // their stops will be created as directional placeholders and then
+  // resolved by the downstream Amap candidate-pool / directional resolver,
+  // which use city-aware cuisine hints.
+  if (!isShanghaiConstraint(constraints)) return [];
   let filtered = type ? allNodes.filter((n) => n.type === type) : [...allNodes];
 
   if (type && type !== "transport") {
@@ -183,6 +200,74 @@ function pickTop(
     .filter((n) => !exclude.includes(n.id))
     .sort((a, b) => scoreNode(b, constraints) - scoreNode(a, constraints))
     .slice(0, count);
+}
+
+/**
+ * For non-Shanghai cities, synthesize a slim list of directional stops so the
+ * planner output isn't transport-only. These stops carry `place_kind:
+ * "directional"` from the start — the downstream Amap directional resolver
+ * upgrades them to concrete POIs in the user's actual city using the
+ * city-aware cuisine cascade.
+ *
+ * Returns an array of pseudo-`CityGraphNode` shapes compatible with the
+ * existing timeline-builder. The names are intentionally directional
+ * ("珠江新城附近一家粤菜小馆") so the sanitizer will keep them as
+ * directional rather than rendering a fake map link.
+ */
+function buildNonShanghaiDirectionalStops(
+  constraints: Constraints,
+  timeBudget: TimeBudget,
+): { node: CityGraphNode; activityType: TimelineItem["activity_type"]; label: string }[] {
+  const cityLabel = constraints.city_cn || constraints.city;
+  const cuisines = topLocalCuisinesFor(cityLabel, 2);
+  const lunchCuisine = cuisines[0] || "本地特色";
+  const dinnerCuisine = cuisines[1] || lunchCuisine;
+  const area = constraints.start_location || "市中心";
+
+  const fakeNode = (
+    id: string,
+    name: string,
+    duration: number,
+    tag: string,
+  ): CityGraphNode =>
+    ({
+      id,
+      name,
+      type: "restaurant",
+      area,
+      tags: ["local_food", tag],
+      luggage_friendly: true,
+      rain_friendly: true,
+      walking_intensity: "low",
+      local_experience_score: 8,
+      night_friendly: true,
+      suggested_duration_min: duration,
+      price_level: "medium",
+      risk_to_hongqiao_station: "medium",
+      meal_period: tag === "lunch" ? ["lunch"] : tag === "dinner" ? ["dinner"] : ["any"],
+    } as unknown as CityGraphNode);
+
+  const out: { node: CityGraphNode; activityType: TimelineItem["activity_type"]; label: string }[] = [];
+
+  // Lunch — only when window is wide enough.
+  if (timeBudget.safe_activity_time_min >= 90) {
+    const lunchName = `${area}附近一家${lunchCuisine}小馆`;
+    out.push({
+      node: fakeNode("dir_lunch", lunchName, 60, "lunch"),
+      activityType: "lunch",
+      label: `午餐：${lunchName}`,
+    });
+  }
+  // Dinner — always include for any reasonable window.
+  if (timeBudget.safe_activity_time_min >= 60) {
+    const dinnerName = `${area}附近一家${dinnerCuisine}小馆`;
+    out.push({
+      node: fakeNode("dir_dinner", dinnerName, 70, "dinner"),
+      activityType: "dinner",
+      label: `晚餐：${dinnerName}`,
+    });
+  }
+  return out;
 }
 
 function buildTimeline(
@@ -478,11 +563,73 @@ function checkFailureProtection(
   return null;
 }
 
+/**
+ * Build a plan for any city the demo graph doesn't cover (everything except
+ * Shanghai). The plan uses directional meal stops keyed off the city's local
+ * cuisine — the API route then runs the Amap directional resolver to upgrade
+ * each stop to a real, city-local POI. The demo graph's Shanghai POIs are
+ * never seeded into these plans.
+ */
+function generateNonShanghaiPlan(
+  constraints: Constraints,
+  timeBudget: TimeBudget,
+  failureNote: string | null,
+  planType: Plan["plan_type"],
+): Plan {
+  const stops = buildNonShanghaiDirectionalStops(constraints, timeBudget);
+  const timeline = buildTimeline(constraints, timeBudget, stops);
+  const tags = assessSuitability(timeline, timeBudget, constraints);
+  if (planType === "local_experience") tags.local_experience = "High";
+  if (planType === "low_risk") {
+    tags.time_safety = "High";
+    tags.station_arrival_confidence = Math.min(tags.station_arrival_confidence + 15, 100);
+  }
+  const cityZh = constraints.city_cn || constraints.city || "本地";
+  const cuisines = topLocalCuisinesFor(cityZh, 2).join("/");
+  const explanations: string[] = [
+    `根据${cityZh}的本地餐饮偏好（${cuisines}）安排了${stops.length}个停留点`,
+    `${constraints.departure_time}前预留 ${timeBudget.station_buffer_min} 分钟到站缓冲`,
+  ];
+  if (timeBudget.rush_hour_detected) {
+    explanations.push("末程落在晚高峰，已自动放大通勤时间");
+  }
+  const planName =
+    planType === "balanced" ? "均衡本地路线" :
+    planType === "low_risk" ? "稳妥车站路线" :
+    "深度本地体验";
+  const summary =
+    planType === "low_risk"
+      ? `牺牲一些游览深度，把行程提前向${constraints.final_destination}靠拢，最大限度避免误车。`
+      : planType === "local_experience"
+      ? `在赶车安全边界内把${cityZh}本地体验最大化。`
+      : `在到站安全和${cityZh}本地体验之间求最优解的均衡路线。`;
+  const tradeoff = buildTradeoffSummary(planType, constraints, timeBudget, tags);
+  return {
+    plan_name: planName,
+    plan_type: planType,
+    one_sentence_summary: failureNote || summary,
+    tradeoff_summary: tradeoff,
+    suitability_tags: tags,
+    timeline,
+    route_chain: buildRouteChain(constraints, timeline),
+    latest_leave_for_station: timeBudget.latest_leave_for_station,
+    risk_note:
+      failureNote ||
+      `在${timeBudget.latest_leave_for_station}之前出发前往${constraints.final_destination}即可安全到达。`,
+    backup_suggestion: `如果时间紧张，可以跳过其中一处停留，直接前往${constraints.final_destination}。`,
+    explanation: explanations.join("；") + "。",
+    rush_hour_warning: timeBudget.rush_hour_detected ? timeBudget.rush_hour_note : undefined,
+  };
+}
+
 export function generateBalancedPlan(
   constraints: Constraints,
   timeBudget: TimeBudget,
   failureNote: string | null
 ): Plan {
+  if (!isShanghaiConstraint(constraints)) {
+    return generateNonShanghaiPlan(constraints, timeBudget, failureNote, "balanced");
+  }
   const attractions = filterNodes(constraints, "attraction");
   const areas = filterNodes(constraints, "area");
   const restaurants = filterNodes(constraints, "restaurant");
@@ -549,6 +696,9 @@ export function generateLowRiskPlan(
   timeBudget: TimeBudget,
   failureNote: string | null
 ): Plan {
+  if (!isShanghaiConstraint(constraints)) {
+    return generateNonShanghaiPlan(constraints, timeBudget, failureNote, "low_risk");
+  }
   const restaurants = filterNodes(constraints, "restaurant");
   const cafes = filterNodes(constraints, "cafe");
   const malls = filterNodes(constraints, "mall");
@@ -604,6 +754,14 @@ export function generateLocalExperiencePlan(
   timeBudget: TimeBudget,
   failureNote: string | null
 ): Plan {
+  if (!isShanghaiConstraint(constraints)) {
+    return generateNonShanghaiPlan(
+      constraints,
+      timeBudget,
+      failureNote,
+      "local_experience",
+    );
+  }
   const attractions = filterNodes(constraints, "attraction");
   const areas = filterNodes(constraints, "area");
   const restaurants = filterNodes(constraints, "restaurant");

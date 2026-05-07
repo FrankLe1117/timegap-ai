@@ -58,6 +58,11 @@ const COMMERCIAL_ACTIVITIES: ReadonlySet<TimelineItem["activity_type"]> = new Se
 function extractCuisineHint(name: string): string {
   const n = name || "";
   if (/本帮|上海菜/.test(n)) return "本帮菜";
+  if (/粤菜|广府|早茶|茶餐厅|烧腊|顺德/.test(n)) return "粤菜";
+  if (/川菜|火锅|串串|麻辣/.test(n)) return "川菜";
+  if (/陕菜|肉夹馍|凉皮|羊肉泡馍/.test(n)) return "陕菜";
+  if (/杭帮/.test(n)) return "杭帮菜";
+  if (/京菜|烤鸭|老北京/.test(n)) return "北京菜";
   if (/法式|法餐/.test(n)) return "法餐";
   if (/日料/.test(n)) return "日料";
   if (/咖啡馆?|咖啡店/.test(n)) return "咖啡";

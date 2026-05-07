@@ -35,6 +35,12 @@ import type {
 } from "@/types";
 import { collectUsedKeys, convertStopToDirectional, stopKey } from "./plan-dedupe";
 import { cityNameForAmap } from "./city-detect";
+import {
+  generalizeCuisine,
+  isShanghaiCuisine,
+  looksForeignBrand,
+  topLocalCuisinesFor,
+} from "./city-cuisine";
 
 /** Build the dedupe key Amap POIs map to. Mirrors `stopKey` for resolved stops:
  *  prefer the real upstream id, otherwise normalized name + ~110 m bucket. */
@@ -114,6 +120,12 @@ const KNOWN_LANDMARKS = [
 const CATEGORY_PATTERNS: Array<{ re: RegExp; category: string }> = [
   { re: /老字号/, category: "老字号餐厅" },
   { re: /本帮|上海菜/, category: "本帮菜" },
+  { re: /粤菜|广府|烧腊|顺德/, category: "粤菜" },
+  { re: /早茶|点心/, category: "早茶" },
+  { re: /川菜|火锅|串串|麻辣/, category: "川菜" },
+  { re: /陕菜|肉夹馍|凉皮|羊肉泡馍/, category: "陕菜" },
+  { re: /杭帮/, category: "杭帮菜" },
+  { re: /京菜|烤鸭|老北京/, category: "北京菜" },
   { re: /法式|法餐/, category: "法餐" },
   { re: /日料|日本料理/, category: "日料" },
   { re: /茶餐厅|港式/, category: "茶餐厅" },
@@ -124,15 +136,14 @@ const CATEGORY_PATTERNS: Array<{ re: RegExp; category: string }> = [
 ];
 
 /**
- * Generalization ladder for cuisine categories. Each key maps to broader
- * synonyms ordered by specificity. Used by the cascade to widen searches when
- * a precise cuisine returns nothing reliable — e.g. 本帮菜 → 上海菜 → 江浙菜
- * → 中餐. Empty array means "no further generalization beyond the bare
- * category".
+ * Non-Shanghai-family cuisine generalizations. Cuisines that *do* belong to
+ * the Shanghai/江浙 family (本帮菜/上海菜) flow through `generalizeCuisine` in
+ * `city-cuisine.ts`, which gates 江浙 widening on the current city — that
+ * prevents pulling 江浙菜 into Guangzhou results. Everything else stays here
+ * because the generalization is city-independent.
  */
 const CUISINE_GENERALIZATION: Record<string, string[]> = {
-  本帮菜: ["上海菜", "江浙菜", "中餐"],
-  老字号餐厅: ["中餐", "本帮菜", "上海菜"],
+  老字号餐厅: ["中餐"],
   法餐: ["西餐", "法国菜"],
   日料: ["日本料理", "亚洲菜"],
   茶餐厅: ["粤菜", "港式茶餐厅", "中餐"],
@@ -189,7 +200,10 @@ export function extractDirectionalIntent(item: TimelineItem): DirectionalIntent 
  * Build a small set of Amap keyword queries from intent. Ordered most→least
  * specific so the first one tends to land the best match.
  */
-export function buildIntentQueries(intent: DirectionalIntent): string[] {
+export function buildIntentQueries(
+  intent: DirectionalIntent,
+  cityLabel?: string | null,
+): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   const push = (q: string) => {
@@ -201,12 +215,17 @@ export function buildIntentQueries(intent: DirectionalIntent): string[] {
   };
   const a = intent.area || "";
   const cat = intent.category;
+  const local = topLocalCuisinesFor(cityLabel, 1)[0];
 
   if (a) {
     push(`${a} ${cat}`);
     if (cat === "本帮菜") push(`${a} 上海菜`);
     if (cat === "老字号餐厅") push(`${a} 老字号 餐厅`);
-    if (cat === "餐厅") push(`${a} 本帮菜`);
+    if (cat === "餐厅" && local && local !== "餐厅") {
+      // City-aware: in Guangzhou, "餐厅" with a known area should bias toward
+      // 粤菜 — not 本帮菜 as before.
+      push(`${a} ${local}`);
+    }
   }
   // Bare category last, so we always have a terminal fallback.
   push(cat);
@@ -232,8 +251,9 @@ export function buildIntentQueries(intent: DirectionalIntent): string[] {
 export function buildMealFallbackQueries(
   intent: DirectionalIntent,
   cuisineHints: string[] = [],
+  cityLabel?: string | null,
 ): string[] {
-  const levels = buildMealCascadeLevels(intent, cuisineHints);
+  const levels = buildMealCascadeLevels(intent, cuisineHints, cityLabel);
   const out: string[] = [];
   const seen = new Set<string>();
   for (const lvl of levels) {
@@ -270,29 +290,54 @@ export function buildMealFallbackQueries(
 export function buildMealCascadeLevels(
   intent: DirectionalIntent,
   cuisineHints: string[] = [],
+  cityLabel?: string | null,
 ): string[][] {
   const a = intent.area || "";
   const isCoffee = intent.activity === "coffee";
 
   // Collect cuisine tokens. Order matters: intent's own category first, then
   // user-provided hints, then anything that came from generalizing those.
+  // City-aware filter: if the city is non-Shanghai-family, drop Shanghai
+  // cuisine tokens that weren't in the user's intent — they only get added
+  // here when intent.category is itself 本帮菜/上海菜 (i.e. the user asked).
+  const cityAllowsShanghai = (() => {
+    if (!cityLabel) return true;
+    const lower = String(cityLabel).toLowerCase();
+    return /shanghai|上海|沪|杭州|hangzhou|nanjing|南京|金陵/.test(lower);
+  })();
+  const intentIsShanghai = isShanghaiCuisine(intent.category);
+
   const baseCuisines: string[] = [];
   const seenCuisine = new Set<string>();
   const addCuisine = (c: string | undefined | null) => {
     if (!c) return;
     const t = c.trim();
     if (!t || t === "餐厅" || seenCuisine.has(t)) return;
+    // City-aware filter: if the city is non-Shanghai-family AND the user's
+    // *intent* isn't a Shanghai cuisine, drop any Shanghai cuisine token from
+    // the search ladder (e.g. don't search 本帮菜 in 广州 when intent is 餐厅).
+    if (!cityAllowsShanghai && !intentIsShanghai && isShanghaiCuisine(t)) return;
     seenCuisine.add(t);
     baseCuisines.push(t);
   };
   addCuisine(intent.category);
   for (const h of cuisineHints) addCuisine(h);
 
-  // Generalized synonyms for everything we collected so far.
+  // For non-Shanghai cities with no specific cuisine in intent, seed the
+  // search with the city's local cuisines so we never run "餐厅" alone.
+  if (!intentIsShanghai && cityLabel) {
+    for (const lc of topLocalCuisinesFor(cityLabel, 3)) addCuisine(lc);
+  }
+
+  // Generalized synonyms for everything we collected so far. Shanghai-style
+  // cuisines flow through `generalizeCuisine` (city-aware) — outside the
+  // Shanghai family it widens only to 中餐, NOT to 江浙菜.
   const generalized: string[] = [];
   const seenGen = new Set<string>(seenCuisine);
   for (const c of [...baseCuisines]) {
-    const syns = CUISINE_GENERALIZATION[c] || [];
+    const syns = isShanghaiCuisine(c)
+      ? generalizeCuisine(c, cityLabel)
+      : (CUISINE_GENERALIZATION[c] || generalizeCuisine(c, cityLabel));
     for (const s of syns) {
       if (!seenGen.has(s)) {
         seenGen.add(s);
@@ -428,13 +473,21 @@ function pickReliable(
   activity: TimelineItem["activity_type"],
   anchor?: AmapCoord | null,
   usedKeys?: Set<string>,
+  cityLabel?: string | null,
 ): AmapPoi | null {
+  // Two-pass: first prefer non-foreign-brand POIs; if none qualifies, fall
+  // back to allow foreign-brand ones rather than returning nothing.
+  let foreignFallback: AmapPoi | null = null;
   for (const p of pois) {
     if (!isPoiReliableForActivity(p, activity, anchor)) continue;
     if (usedKeys && usedKeys.has(poiDedupeKey(p))) continue;
+    if (cityLabel && looksForeignBrand(p.name, cityLabel)) {
+      if (!foreignFallback) foreignFallback = p;
+      continue;
+    }
     return p;
   }
-  return null;
+  return foreignFallback;
 }
 
 /**
@@ -486,7 +539,7 @@ export async function resolveDirectionalStop(
   options: { cuisineHints?: string[] } = {},
 ): Promise<AmapPoi | null> {
   // Level 0: intent-derived queries with the standard 2.5 km radius.
-  const l0Queries = buildIntentQueries(intent);
+  const l0Queries = buildIntentQueries(intent, city);
   const l0Budget = MEAL_CASCADE_BUDGETS[0];
   for (const q of l0Queries) {
     const pick = await runCascadeQuery(q, intent, anchor, city, l0Budget, deps, usedKeys);
@@ -500,7 +553,7 @@ export async function resolveDirectionalStop(
   if (!isMeal) return null;
 
   // Levels 1..4: meal/coffee cascade.
-  const cascade = buildMealCascadeLevels(intent, options.cuisineHints || []);
+  const cascade = buildMealCascadeLevels(intent, options.cuisineHints || [], city);
   for (let i = 0; i < cascade.length; i++) {
     const queries = cascade[i];
     const budget = MEAL_CASCADE_BUDGETS[Math.min(i + 1, MEAL_CASCADE_BUDGETS.length - 1)];
@@ -533,7 +586,7 @@ async function runCascadeQuery(
   if (!pois.length) {
     pois = await deps.searchByKeyword(query, city, budget.limit);
   }
-  return pickReliable(pois, intent.activity, anchor, usedKeys);
+  return pickReliable(pois, intent.activity, anchor, usedKeys, city);
 }
 
 /**
@@ -566,6 +619,9 @@ export async function resolveMealReplacement(args: {
     activity: args.activity,
   };
   const deps = args.deps || DEFAULT_DEPS;
+  // Caller is expected to pass `city`. We keep "上海" as ultimate fallback
+  // only when nothing was supplied — that branch is essentially dead in the
+  // current API route since the route always passes the parsed city.
   return resolveDirectionalStop(
     intent,
     args.anchor,
