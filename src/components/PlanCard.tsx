@@ -106,6 +106,29 @@ export default function PlanCard({ plan, selected, onSelect }: PlanCardProps) {
           </div>
         </div>
 
+        {/* Distinctive one-line highlight to make the three options easy to compare */}
+        {!selected && plan.one_sentence_summary && (
+          <p className={`text-xs ${meta.accentText} bg-white/0 mb-2 leading-snug line-clamp-2`}>
+            {plan.one_sentence_summary}
+          </p>
+        )}
+
+        {/* Highlight stops chips for quick comparison */}
+        {!selected && (
+          <div className="flex items-center gap-1 flex-wrap mb-2">
+            {plan.timeline
+              .filter((t) => !["transport", "station_buffer"].includes(t.activity_type))
+              .slice(0, 4)
+              .map((t, i, arr) => (
+                <span key={i} className="inline-flex items-center text-[11px] text-slate-600">
+                  <span className={`w-1 h-1 rounded-full ${meta.dotColor} mr-1`} />
+                  {t.place_name}
+                  {i < arr.length - 1 && <span className="mx-1 text-slate-300">›</span>}
+                </span>
+              ))}
+          </div>
+        )}
+
         <div className="flex items-center gap-2.5 flex-wrap">
           <div className="flex items-center gap-1.5">
             <span className="text-[11px] text-slate-400">到站信心</span>
@@ -117,7 +140,8 @@ export default function PlanCard({ plan, selected, onSelect }: PlanCardProps) {
         </div>
 
         {!selected && (
-          <div className="mt-2 pt-2 border-t border-slate-50">
+          <div className="mt-2 pt-2 border-t border-slate-50 flex items-center justify-between">
+            <p className="text-[11px] text-slate-500">最晚出发去车站 <span className="font-mono text-red-600 font-semibold">{plan.latest_leave_for_station}</span></p>
             <p className="text-[11px] text-blue-600 font-medium">查看详情 →</p>
           </div>
         )}

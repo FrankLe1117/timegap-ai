@@ -19,10 +19,10 @@ export default function MockCalendar({ onSelectWindow }: { onSelectWindow: (wind
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <div className="px-4 py-2.5 border-b border-slate-100">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-slate-700">今日日程</h3>
-          <span className="flex items-center gap-1.5 text-[11px] text-emerald-600">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            日历已同步
+          <h3 className="text-xs font-semibold text-slate-700">今日日程（演示数据）</h3>
+          <span className="flex items-center gap-1.5 text-[11px] text-slate-500">
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+            模拟日历
           </span>
         </div>
       </div>

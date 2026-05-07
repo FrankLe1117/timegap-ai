@@ -25,13 +25,27 @@ interface Message {
   content: string;
 }
 
+interface ClarificationPrompt {
+  missing: string[];
+  assumptions: string[];
+  onAcceptDefaults: () => void;
+}
+
 interface ChatPanelProps {
   onPlan: (input: string, constraints?: Record<string, unknown>) => void;
   loading: boolean;
   messages: Message[];
+  clarification?: ClarificationPrompt | null;
 }
 
-export default function ChatPanel({ onPlan, loading, messages }: ChatPanelProps) {
+const FIELD_LABELS_ZH: Record<string, string> = {
+  start_location: "起点",
+  final_destination: "终点",
+  start_time: "空闲开始时间",
+  departure_time: "出发车次时间",
+};
+
+export default function ChatPanel({ onPlan, loading, messages, clarification }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const [showExamples, setShowExamples] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -126,6 +140,31 @@ export default function ChatPanel({ onPlan, loading, messages }: ChatPanelProps)
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Clarification prompt — shown when parser confidence is low */}
+      {clarification && (
+        <div className="mx-6 mb-3 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-xs text-amber-800">
+          <p className="font-medium mb-1.5">需要确认这些信息：</p>
+          <ul className="list-disc list-inside space-y-0.5 mb-2">
+            {clarification.missing.map((m) => (
+              <li key={m}>{FIELD_LABELS_ZH[m] || m}</li>
+            ))}
+          </ul>
+          {clarification.assumptions.length > 0 && (
+            <p className="text-[11px] text-amber-700/80 mb-2">
+              如果不补充，将使用默认：{clarification.assumptions.join("；")}。
+            </p>
+          )}
+          <button
+            onClick={clarification.onAcceptDefaults}
+            disabled={loading}
+            className="text-[11px] px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-full disabled:opacity-50"
+          >
+            就按默认规划
+          </button>
+          <span className="ml-2 text-[11px] text-amber-700/80">或在下方补充信息</span>
         </div>
       )}
 

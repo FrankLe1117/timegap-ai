@@ -1,5 +1,13 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Environment
+
+`PERPLEXITY_API_KEY` (optional): server-side key used to parse natural-language
+constraints with Perplexity inside `/api/plan`. When the key is missing, the
+call times out, or the response is invalid, the app falls back to the built-in
+rule-based parser in `src/lib/constraint-parser.ts`. Copy `.env.example` to
+`.env.local` and fill in the key. The key is only read on the server.
+
 ## Getting Started
 
 First, run the development server:

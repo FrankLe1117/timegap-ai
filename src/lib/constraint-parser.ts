@@ -1,4 +1,4 @@
-import { Constraints } from "@/types";
+import { Constraints, ParseResult } from "@/types";
 
 const locationMap: Record<string, { id: string; name: string }> = {
   "陆家嘴": { id: "lujiazui", name: "陆家嘴" },
@@ -50,7 +50,6 @@ function extractLocations(text: string): { start: string | null; end: string | n
   let end = found[1] || null;
 
   if (start && end) {
-    // "从X出发/离开" → destination
     if (start.includes("虹桥") || start.includes("机场")) {
       [start, end] = [end, start];
     }
@@ -83,7 +82,7 @@ function extractConstraints(text: string): string[] {
   return cons;
 }
 
-export function parseConstraints(userInput: string): Constraints {
+export function parseConstraintsRule(userInput: string): ParseResult {
   const { start, end } = extractLocations(userInput);
   const preferences = extractPreferences(userInput);
   const extractedConstraints = extractConstraints(userInput);
@@ -98,8 +97,31 @@ export function parseConstraints(userInput: string): Constraints {
     if (s.match(/出发|离开|坐.*车|高铁|火车|飞机|动车/)) endTimeText = s;
   }
 
-  const startTime = extractTime(startTimeText, "start") || "12:00";
-  const endTime = extractTime(endTimeText, "end") || "22:00";
+  const rawStartTime = extractTime(startTimeText, "start");
+  const rawEndTime = extractTime(endTimeText, "end");
+
+  const missing: string[] = [];
+  const assumptions: string[] = [];
+
+  if (!start) {
+    missing.push("start_location");
+    assumptions.push("起点默认设为「陆家嘴」");
+  }
+  if (!end) {
+    missing.push("final_destination");
+    assumptions.push("终点默认设为「上海虹桥站」");
+  }
+  if (!rawStartTime) {
+    missing.push("start_time");
+    assumptions.push("起始时间默认为 12:00");
+  }
+  if (!rawEndTime) {
+    missing.push("departure_time");
+    assumptions.push("出发车次时间默认为 22:00");
+  }
+
+  const startTime = rawStartTime || "12:00";
+  const endTime = rawEndTime || "22:00";
 
   const [dh, dm] = endTime.split(":").map(Number);
   const recMin = dh * 60 + dm - 45;
@@ -116,7 +138,7 @@ export function parseConstraints(userInput: string): Constraints {
   let walkPref: Constraints["walking_preference"] = "medium";
   if (userInput.match(/少走|不太累|轻松|不想走/)) walkPref = "low";
 
-  return {
+  const constraints: Constraints = {
     city: "Shanghai",
     start_location: start || "陆家嘴",
     start_time: startTime,
@@ -132,4 +154,21 @@ export function parseConstraints(userInput: string): Constraints {
     food_preference: foodPrefs,
     plan_style: "balanced",
   };
+
+  let confidence: ParseResult["confidence"] = "high";
+  if (missing.length >= 2) confidence = "low";
+  else if (missing.length === 1) confidence = "medium";
+
+  return {
+    constraints,
+    confidence,
+    missing,
+    assumptions,
+    source: "rule",
+  };
+}
+
+// Backwards-compatible export — returns just the constraints.
+export function parseConstraints(userInput: string): Constraints {
+  return parseConstraintsRule(userInput).constraints;
 }

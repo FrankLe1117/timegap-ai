@@ -102,11 +102,32 @@ export interface ReplanChange {
   detail: string;
 }
 
+export interface ParseResult {
+  constraints: Constraints;
+  confidence: "high" | "medium" | "low";
+  missing: string[];
+  assumptions: string[];
+  source: "llm" | "rule";
+  notes?: string;
+}
+
+export interface ClarificationResponse {
+  needsClarification: true;
+  parseResult: ParseResult;
+  message: string;
+}
+
 export interface PlanResponse {
   parsedConstraints: Constraints;
   timeBudget: TimeBudget;
   plans: Plan[];
   replanChanges?: ReplanChange[];
+  parseMeta?: {
+    source: "llm" | "rule";
+    confidence: "high" | "medium" | "low";
+    assumptions: string[];
+    notes?: string;
+  };
   dataSources: {
     places: string;
     travelTimes: string;
