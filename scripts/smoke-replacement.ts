@@ -34,6 +34,11 @@ const candidate = {
   district: "浦东新区",
   address: "世纪大道100号",
   tags: ["五星级酒店"],
+  poi_id: "B0FFGPX001",
+  raw_type: "餐饮服务;中餐厅;本帮江浙菜",
+  reliability: "confirmed" as const,
+  confidence: 0.95,
+  allow_in_itinerary: true,
 };
 
 const stationFriendlyCandidate = {
@@ -45,6 +50,11 @@ const stationFriendlyCandidate = {
   source: "amap" as const,
   district: "闵行区",
   tags: ["本帮菜"],
+  poi_id: "B0FFGPX999",
+  raw_type: "餐饮服务;中餐厅;本帮江浙菜",
+  reliability: "confirmed" as const,
+  confidence: 0.95,
+  allow_in_itinerary: true,
 };
 
 const pool: CandidatePool = {
@@ -277,6 +287,84 @@ const planResponse: PlanResponse = {
   ok(
     !!buffer!.amap_url && buffer!.amap_url.includes("121.32%2C31.197"),
     "station_buffer amap_url points at destination",
+  );
+
+  // ----- Reliability gate regression -----
+  // A synthetic candidate (no poi_id, generic name, no address/type) must not
+  // replace a demo dinner stop, even when nothing else fills the slot.
+  const syntheticCandidate = {
+    id: "amap:poi:徐家汇本帮小馆",
+    name: "徐家汇本帮小馆",
+    category: "restaurant" as const,
+    coord: { lng: 121.435, lat: 31.195 },
+    score: 0.5,
+    source: "amap" as const,
+    district: "徐汇区",
+    poi_id: undefined,
+    raw_type: undefined,
+    reliability: "suggested" as const,
+    confidence: 0.1,
+    allow_in_itinerary: false,
+  };
+
+  const syntheticPool: CandidatePool = {
+    byCategory: {
+      restaurant: [syntheticCandidate],
+      cafe: [],
+      scenic: [],
+      indoor: [],
+      station_friendly: [syntheticCandidate],
+    },
+    hasRealData: true,
+    sources: ["amap"],
+  };
+
+  // Build a fresh demo plan with the same shape as the original.
+  const synDemoLunch: TimelineItem = { ...demoStop };
+  const synDemoDinner: TimelineItem = { ...finalDinner };
+  const synPlan: Plan = {
+    ...plan,
+    timeline: [
+      transportToLunch,
+      synDemoLunch,
+      transportToDinner,
+      synDemoDinner,
+      transportToDest,
+      stationBuffer,
+    ],
+  };
+  const synResp: PlanResponse = { ...planResponse, plans: [synPlan] };
+  const synResult = await applyCandidatesToPlans(synResp, syntheticPool, {
+    startCoord: { lng: 121.5, lat: 31.24 },
+    destCoord: { lng: 121.32, lat: 31.197 },
+  });
+  ok(synResult.replacedTotal === 0, "synthetic candidate did NOT replace any stop");
+  const synStops = synResult.response.plans[0].timeline.filter(
+    (t) => t.activity_type !== "transport" && t.activity_type !== "station_buffer",
+  );
+  const synLunch = synStops.find((t) => t.activity_type === "lunch")!;
+  const synDinner = synStops.find((t) => t.activity_type === "dinner")!;
+  ok(synLunch.place_name === "老克勒餐厅", "demo lunch place_name preserved");
+  ok(synDinner.place_name === "苏浙汇", "demo dinner place_name preserved");
+  ok(
+    !synStops.some((t) => t.place_name === "徐家汇本帮小馆"),
+    "synthetic name 徐家汇本帮小馆 never appears in timeline",
+  );
+  ok(
+    !synStops.some((t) => t.candidate_reliability === "suggested"),
+    "no stop is tagged with reliability=suggested",
+  );
+  ok(
+    synResult.response.dataSources.candidatesUsed !== true,
+    "candidatesUsed is not set when only synthetic candidates exist",
+  );
+
+  // ----- Reliability propagation -----
+  // The confirmed candidate from the original test should now carry through
+  // candidate_reliability === "confirmed" on the replaced lunch stop.
+  ok(
+    lunch.candidate_reliability === "confirmed",
+    "confirmed candidate propagates candidate_reliability=confirmed",
   );
 
   console.log("\nALL SMOKE ASSERTIONS PASSED");

@@ -33,6 +33,10 @@ export interface AmapPoi {
   coord: AmapCoord;
   type?: string;
   district?: string;
+  /** True when `id` was supplied by the upstream API (i.e. a real POI id),
+   *  false when we synthesized it because the response omitted one. Reliability
+   *  gating downstream depends on this distinction. */
+  hasRealId?: boolean;
 }
 
 export interface RouteEstimate {
@@ -175,13 +179,15 @@ export async function searchPoiByKeyword(
     .map((p): AmapPoi | null => {
       const coord = parseLocation(p.location);
       if (!coord || !p.name) return null;
+      const realId = typeof p.id === "string" && p.id.trim().length > 0;
       return {
-        id: p.id || `poi:${p.name}`,
+        id: realId ? p.id! : `poi:${p.name}`,
         name: p.name,
         address: p.address,
         coord,
         type: p.type,
         district: p.adname,
+        hasRealId: realId,
       };
     })
     .filter((x): x is AmapPoi => x !== null);
@@ -222,13 +228,15 @@ export async function searchPoiNearby(
     .map((p): AmapPoi | null => {
       const coord = parseLocation(p.location);
       if (!coord || !p.name) return null;
+      const realId = typeof p.id === "string" && p.id.trim().length > 0;
       return {
-        id: p.id || `poi:${p.name}`,
+        id: realId ? p.id! : `poi:${p.name}`,
         name: p.name,
         address: p.address,
         coord,
         type: p.type,
         district: p.adname,
+        hasRealId: realId,
       };
     })
     .filter((x): x is AmapPoi => x !== null);

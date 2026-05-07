@@ -97,7 +97,10 @@ function pickCandidateForSlot(
   destCoord: AmapCoord | null,
   isLastStop: boolean,
 ): Candidate | null {
-  const pool = candidates.filter((c) => !used.has(c.id));
+  // Reliability gate: only candidates that explicitly cleared validation may
+  // replace a demo stop. This is the firewall that keeps synthetic-looking
+  // names like "徐家汇本帮小馆" out of the itinerary.
+  const pool = candidates.filter((c) => !used.has(c.id) && c.allow_in_itinerary);
   if (pool.length === 0) return null;
   const ranked = pool
     .map((c) => {
@@ -401,6 +404,7 @@ async function applyToPlan(
       lat: pick.coord.lat,
       source: pick.source,
       candidate_score: pick.score,
+      candidate_reliability: pick.reliability,
       amap_url: candidateUrl,
       reason: pick.district
         ? `${pick.district}・${primary === "station_friendly" ? "靠近车站候选" : "高德候选点"}`

@@ -55,9 +55,26 @@ export default function TimelineItem({ item, isLast }: { item: TimelineItemType;
         <div className={`px-3 py-2 rounded-lg border ${activityColors[item.activity_type] || "border-slate-200 bg-white"}`}>
           <div className="flex items-center gap-1.5">
             <p className="text-sm font-medium text-slate-800">{item.title}</p>
-            {item.source && item.source !== "demo" && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200">
-                {item.source === "amap" ? "高德" : "美团"}
+            {item.source && item.source !== "demo" && item.candidate_reliability !== "suggested" && (
+              <span
+                className={
+                  item.candidate_reliability === "confirmed"
+                    ? "text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200"
+                    : "text-[10px] px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200"
+                }
+                title={
+                  item.candidate_reliability === "confirmed"
+                    ? "数据来自高德 POI 接口，已通过校验"
+                    : "高德候选，未达到全部校验"
+                }
+              >
+                {item.source === "amap"
+                  ? item.candidate_reliability === "confirmed"
+                    ? "高德已验证"
+                    : "高德候选"
+                  : item.candidate_reliability === "confirmed"
+                    ? "美团已验证"
+                    : "美团候选"}
               </span>
             )}
           </div>

@@ -98,6 +98,10 @@ export interface TimelineItem {
   source?: "demo" | "amap" | "meituan";
   /** [0,1] candidate score when the stop was inserted from a real candidate pool. */
   candidate_score?: number;
+  /** Reliability tier when the stop came from a real candidate. Used by the
+   *  UI to choose between a "高德已验证" badge (confirmed) and a softer
+   *  "高德候选" badge (probable). Absent for demo stops. */
+  candidate_reliability?: "confirmed" | "probable" | "suggested";
 }
 
 export interface SuitabilityTags {
