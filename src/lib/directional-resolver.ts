@@ -758,6 +758,11 @@ async function resolvePlan(
   deps: AmapSearchDeps,
   cuisineHints: string[] = [],
   planIndex = 0,
+  // Shared across-plan dedupe: any POI a sibling plan already resolved is
+  // added here so `pickReliable` will skip it for this plan (when there's
+  // an alternative). Last-meal slots can fall back to reuse when nothing
+  // else clears the gate — see resolveDirectionalSuggestions for details.
+  usedAcrossPlans?: Set<string>,
 ): Promise<{
   plan: Plan;
   resolvedCount: number;
@@ -777,6 +782,12 @@ async function resolvePlan(
   // anything resolved upstream by enrichment / candidate replacement counts
   // as "already used" for directional resolution within this plan.
   const usedKeys = collectUsedKeys(plan.timeline, plan.timeline.length);
+  // Layer in cross-plan dedupe. We copy the keys (not aliasing the parent
+  // set) so this plan can still pick them as a last resort — see the
+  // last-meal fallback below — without polluting future siblings.
+  if (usedAcrossPlans) {
+    for (const k of usedAcrossPlans) usedKeys.add(k);
+  }
 
   for (const item of plan.timeline) {
     if (!isDirectionalStop(item)) {
@@ -880,6 +891,23 @@ async function resolvePlan(
     usedKeys.add(poiDedupeKey(poi));
     const k = stopKey(rebuilt);
     if (k) usedKeys.add(k);
+    // Cross-plan dedupe: the next plan should prefer something different.
+    // We don't gate the LAST stop (typically dinner near the destination)
+    // because alternatives near the terminal are usually scarce; reusing
+    // the same dinner across plans is acceptable, while reusing the lunch
+    // or city-walk POI across plans would make the cards visually identical.
+    if (usedAcrossPlans) {
+      const stops = plan.timeline.filter(
+        (t) => t.activity_type !== "transport" && t.activity_type !== "station_buffer",
+      );
+      const isLastStop =
+        stops.length > 0 && stops[stops.length - 1].place_name === item.place_name;
+      const isTerminalMeal = isLastStop && (item.activity_type === "dinner");
+      if (!isTerminalMeal) {
+        usedAcrossPlans.add(poiDedupeKey(poi));
+        if (k) usedAcrossPlans.add(k);
+      }
+    }
     anchor = poi.coord;
     newTimeline.push(rebuilt);
   }
@@ -1087,10 +1115,23 @@ export async function resolveDirectionalSuggestions(
   let manualConfirmTotal = 0;
   const allDiagnostics: MealResolutionDiagnostic[] = [];
   const newPlans: Plan[] = [];
+  // Cross-plan dedupe set: each plan's resolver populates it (except for
+  // the last stop, which is allowed to repeat). Subsequent plans seed
+  // their own usedKeys from this so they prefer different POIs when the
+  // pool of reliable Amap hits has alternatives.
+  const usedAcrossPlans = new Set<string>();
   for (let p = 0; p < response.plans.length; p++) {
     const plan = response.plans[p];
     try {
-      const r = await resolvePlan(plan, startCoord, city, deps, cuisineHints, p);
+      const r = await resolvePlan(
+        plan,
+        startCoord,
+        city,
+        deps,
+        cuisineHints,
+        p,
+        usedAcrossPlans,
+      );
       newPlans.push(r.plan);
       resolvedTotal += r.resolvedCount;
       manualConfirmTotal += r.manualConfirmCount;

@@ -18,7 +18,8 @@
     "smoke:amap-resolver": "node scripts/run-smoke-amap-resolver.cjs",
     "smoke:city-cuisine": "node scripts/run-smoke-city-cuisine.cjs",
     "smoke:gz-directional": "node scripts/run-smoke-guangzhou-directional.cjs",
-    "smoke": "node scripts/run-smoke.cjs && node scripts/run-smoke-zh-time.cjs && node scripts/run-smoke-buffer.cjs && node scripts/run-smoke-place-sanitize.cjs && node scripts/run-smoke-directional-resolve.cjs && node scripts/run-smoke-city.cjs && node scripts/run-smoke-amap-resolver.cjs && node scripts/run-smoke-city-cuisine.cjs && node scripts/run-smoke-guangzhou-directional.cjs"
+    "smoke:multi-plan": "node scripts/run-smoke-multi-plan-diversity.cjs",
+    "smoke": "node scripts/run-smoke.cjs && node scripts/run-smoke-zh-time.cjs && node scripts/run-smoke-buffer.cjs && node scripts/run-smoke-place-sanitize.cjs && node scripts/run-smoke-directional-resolve.cjs && node scripts/run-smoke-city.cjs && node scripts/run-smoke-amap-resolver.cjs && node scripts/run-smoke-city-cuisine.cjs && node scripts/run-smoke-guangzhou-directional.cjs && node scripts/run-smoke-multi-plan-diversity.cjs"
   },
   "dependencies": {
     "html-to-image": "^1.11.13",

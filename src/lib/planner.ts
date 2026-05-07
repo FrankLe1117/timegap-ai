@@ -217,18 +217,27 @@ function pickTop(
 function buildNonShanghaiDirectionalStops(
   constraints: Constraints,
   timeBudget: TimeBudget,
+  planType: Plan["plan_type"] = "balanced",
 ): { node: CityGraphNode; activityType: TimelineItem["activity_type"]; label: string }[] {
   const cityLabel = constraints.city_cn || constraints.city;
-  const cuisines = topLocalCuisinesFor(cityLabel, 2);
+  // Pull more cuisines so different plan types can pick distinct ones,
+  // even when the city only has 2-3 mainstream cuisines.
+  const cuisines = topLocalCuisinesFor(cityLabel, 4);
   const lunchCuisine = cuisines[0] || "本地特色";
   const dinnerCuisine = cuisines[1] || lunchCuisine;
+  // Alternate cuisine for the local-experience plan so even the
+  // directional placeholder text differs from the balanced one.
+  const altLunchCuisine = cuisines[2] || cuisines[1] || lunchCuisine;
+  const altDinnerCuisine = cuisines[3] || cuisines[0] || dinnerCuisine;
   const area = constraints.start_location || "市中心";
+  const dest = constraints.final_destination || "";
 
   const fakeNode = (
     id: string,
     name: string,
     duration: number,
     tag: string,
+    overrides: Partial<CityGraphNode> = {},
   ): CityGraphNode =>
     ({
       id,
@@ -245,11 +254,65 @@ function buildNonShanghaiDirectionalStops(
       price_level: "medium",
       risk_to_hongqiao_station: "medium",
       meal_period: tag === "lunch" ? ["lunch"] : tag === "dinner" ? ["dinner"] : ["any"],
+      ...overrides,
     } as unknown as CityGraphNode);
 
   const out: { node: CityGraphNode; activityType: TimelineItem["activity_type"]; label: string }[] = [];
 
-  // Lunch — only when window is wide enough.
+  if (planType === "low_risk") {
+    // Safety-first: skip the lunch slot in favor of one meal closer to the
+    // terminal. Even when the window is wide enough we keep this short to
+    // emphasise the buffer-leaning structure.
+    const dinnerArea = dest || area;
+    const dinnerName = `${dinnerArea}附近一家${dinnerCuisine}小馆`;
+    out.push({
+      node: fakeNode("dir_dinner_safe", dinnerName, 60, "dinner", {
+        risk_to_hongqiao_station: "low",
+      }),
+      activityType: "dinner",
+      label: `早晚餐：${dinnerName}`,
+    });
+    return out;
+  }
+
+  if (planType === "local_experience") {
+    // Local-depth: try to fit a lunch + a city-walk anchor + a different
+    // dinner. The walk slot is materialised as an attraction-style fake
+    // node so the directional resolver later upgrades it independently
+    // from the meal slots.
+    if (timeBudget.safe_activity_time_min >= 90) {
+      const lunchName = `${area}附近一家${altLunchCuisine}小馆`;
+      out.push({
+        node: fakeNode("dir_lunch_deep", lunchName, 60, "lunch"),
+        activityType: "lunch",
+        label: `午餐：${lunchName}`,
+      });
+    }
+    if (timeBudget.safe_activity_time_min >= 180) {
+      const walkName = `${area}周边老街/本地市集`;
+      out.push({
+        node: fakeNode("dir_walk_deep", walkName, 50, "city_walk", {
+          type: "area",
+          tags: ["city_walk", "local_food"],
+          local_experience_score: 9,
+          walking_intensity: "medium",
+        }),
+        activityType: "city_walk",
+        label: `${walkName}漫步`,
+      });
+    }
+    if (timeBudget.safe_activity_time_min >= 60) {
+      const dinnerName = `${area}附近一家${altDinnerCuisine}馆子`;
+      out.push({
+        node: fakeNode("dir_dinner_deep", dinnerName, 75, "dinner"),
+        activityType: "dinner",
+        label: `晚餐：${dinnerName}`,
+      });
+    }
+    return out;
+  }
+
+  // balanced (default)
   if (timeBudget.safe_activity_time_min >= 90) {
     const lunchName = `${area}附近一家${lunchCuisine}小馆`;
     out.push({
@@ -258,7 +321,6 @@ function buildNonShanghaiDirectionalStops(
       label: `午餐：${lunchName}`,
     });
   }
-  // Dinner — always include for any reasonable window.
   if (timeBudget.safe_activity_time_min >= 60) {
     const dinnerName = `${area}附近一家${dinnerCuisine}小馆`;
     out.push({
@@ -600,13 +662,23 @@ function generateNonShanghaiPlan(
   failureNote: string | null,
   planType: Plan["plan_type"],
 ): Plan {
-  const stops = buildNonShanghaiDirectionalStops(constraints, timeBudget);
+  const stops = buildNonShanghaiDirectionalStops(constraints, timeBudget, planType);
   const timeline = buildTimeline(constraints, timeBudget, stops);
   const tags = assessSuitability(timeline, timeBudget, constraints);
-  if (planType === "local_experience") tags.local_experience = "High";
+  if (planType === "local_experience") {
+    tags.local_experience = "High";
+    // Boost experience score so the deep-local card visibly reads higher
+    // than the safer cards in the score bars, even when both share at
+    // least one meal slot of the same cuisine cascade.
+    tags.experience_score = Math.min(100, tags.experience_score + 8);
+    tags.station_arrival_confidence = Math.max(10, tags.station_arrival_confidence - 4);
+  }
   if (planType === "low_risk") {
     tags.time_safety = "High";
     tags.station_arrival_confidence = Math.min(tags.station_arrival_confidence + 15, 100);
+    // Inversely lower experience to signal the trade-off: fewer/closer
+    // stops means less of the city.
+    tags.experience_score = Math.max(10, tags.experience_score - 6);
   }
   const cityZh = constraints.city_cn || constraints.city || "本地";
   const cuisines = topLocalCuisinesFor(cityZh, 2).join("/");

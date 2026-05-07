@@ -85,11 +85,29 @@ function kmBetween(a: AmapCoord, b: AmapCoord): number {
 }
 
 /**
+ * Strategy hint guiding how a candidate is scored when filling a slot.
+ *
+ * - "balanced": classic score + mild distance penalty.
+ * - "low_risk": heavily reward candidates near the destination terminal,
+ *   penalize ones far from it; prefer fewer/closer stops.
+ * - "local_experience": deprioritize destination proximity, reward stronger
+ *   raw candidate.score (which already factors in localCuisineBoost), and
+ *   accept slightly more distance.
+ */
+export type PlanStrategy = "balanced" | "low_risk" | "local_experience";
+
+/**
  * Heuristically pick the best candidate for a slot.
- * - prefers high candidate.score
+ * - prefers high candidate.score (with strategy-specific shaping)
  * - prefers proximity to anchor (start of timeline) to keep travel short
- * - applies a tiny last-stop station-safety bonus when destCoord is given
- * - excludes already-used candidates for diversity
+ * - applies a last-stop station-safety bonus when destCoord is given
+ * - excludes already-used candidates for diversity (within plan AND across plans)
+ *
+ * `usedAcrossPlans` is a soft-dedupe set: when a candidate appears in it
+ * (because an earlier plan locked it in), we apply a strong score penalty
+ * but do NOT outright reject — that way a small candidate pool can still
+ * fill every plan, and a much-better candidate can still beat a sibling
+ * plan's pick. Hard exclusion happens via `used` (within the current plan).
  */
 function pickCandidateForSlot(
   candidates: Candidate[],
@@ -97,13 +115,21 @@ function pickCandidateForSlot(
   anchor: AmapCoord | null,
   destCoord: AmapCoord | null,
   isLastStop: boolean,
+  options: {
+    strategy?: PlanStrategy;
+    usedAcrossPlans?: Set<string>;
+    /** Tier-aware index: 0 = first choice for this strategy, 1 = second, … */
+    rank?: number;
+  } = {},
 ): Candidate | null {
+  const strategy = options.strategy || "balanced";
+  const acrossPlans = options.usedAcrossPlans || new Set<string>();
+  const rank = options.rank ?? 0;
   // Reliability gate: only candidates that explicitly cleared validation may
-  // replace a demo stop. This is the firewall that keeps synthetic-looking
-  // names like "徐家汇本帮小馆" out of the itinerary. We also exclude any
-  // candidate whose dedupe key matches one already used in this plan — both
-  // by raw id and by name+coord bucket, so two candidates with different
-  // upstream ids but the same shop don't both land in the same plan.
+  // replace a demo stop. We also exclude any candidate whose dedupe key
+  // matches one already used in THIS plan — both by raw id and by name+coord
+  // bucket, so two candidates with different upstream ids but the same shop
+  // don't both land in the same plan.
   const pool = candidates.filter((c) => {
     if (!c.allow_in_itinerary) return false;
     if (used.has(`id:${c.id}`)) return false;
@@ -115,18 +141,65 @@ function pickCandidateForSlot(
   const ranked = pool
     .map((c) => {
       let s = c.score;
-      if (anchor) {
-        const km = kmBetween(anchor, c.coord);
-        s -= Math.min(km, 8) * 0.04; // mild distance penalty
-      }
-      if (isLastStop && destCoord) {
+      const nameKey = `nc:${(c.name || "").trim().toLowerCase().replace(/\s+/g, "")}@${c.coord.lng.toFixed(3)},${c.coord.lat.toFixed(3)}`;
+      const usedElsewhere =
+        acrossPlans.has(`id:${c.id}`) || acrossPlans.has(nameKey);
+
+      if (strategy === "low_risk" && destCoord) {
+        // Destination-leaning: stronger reward for being near the terminal,
+        // and a heavier penalty for being far from it. Anchor distance still
+        // matters but to a lesser degree.
         const km = kmBetween(destCoord, c.coord);
-        if (km < 4) s += 0.15;
-        else if (km > 12) s -= 0.1;
+        if (km < 3) s += 0.3;
+        else if (km < 6) s += 0.1;
+        else if (km > 10) s -= 0.25;
+        if (anchor) {
+          const akm = kmBetween(anchor, c.coord);
+          s -= Math.min(akm, 8) * 0.02;
+        }
+      } else if (strategy === "local_experience") {
+        // Embrace local depth: distance penalty is gentler so distinctive
+        // POIs don't get crowded out by the closest-to-start chain. Slight
+        // bonus to candidates with a `district` field set (Amap usually
+        // attaches this for confirmed POIs in central districts).
+        if (anchor) {
+          const km = kmBetween(anchor, c.coord);
+          s -= Math.min(km, 10) * 0.02;
+        }
+        if (c.district) s += 0.04;
+        if (isLastStop && destCoord) {
+          // Even local-experience plans care about not being absurdly far
+          // from the terminal for the last meal.
+          const km = kmBetween(destCoord, c.coord);
+          if (km > 14) s -= 0.1;
+        }
+      } else {
+        // balanced
+        if (anchor) {
+          const km = kmBetween(anchor, c.coord);
+          s -= Math.min(km, 8) * 0.04;
+        }
+        if (isLastStop && destCoord) {
+          const km = kmBetween(destCoord, c.coord);
+          if (km < 4) s += 0.15;
+          else if (km > 12) s -= 0.1;
+        }
       }
+
+      // Cross-plan diversity: a sibling plan already used this candidate,
+      // so push it down hard. Big enough to flip rank between equal scores;
+      // small enough that a clearly superior candidate still wins.
+      if (usedElsewhere) s -= 0.45;
+
       return { c, s };
     })
     .sort((a, b) => b.s - a.s);
+  // The cross-plan soft penalty above already shifts already-used candidates
+  // to the back of the pack. The `rank` hint is intentionally NOT used as a
+  // hard "pick the Nth-best" — that would force plan 3 to take a clearly
+  // weaker candidate when only one good alternative exists. Diversification
+  // emerges from the penalty + the strategy-specific shaping above.
+  void rank;
   return ranked[0]?.c || null;
 }
 
@@ -355,6 +428,13 @@ async function applyToPlan(
   destinationName: string,
   departureMinAbs: number,
   stationBufferMin: number,
+  options: {
+    strategy?: PlanStrategy;
+    usedAcrossPlans?: Set<string>;
+    /** Plan ordering index — used as the rank hint passed to
+     *  pickCandidateForSlot so plan #2 prefers the 2nd-best candidate, etc. */
+    planIndex?: number;
+  } = {},
 ): Promise<{ plan: Plan; replacedCount: number; sources: Set<"amap" | "meituan"> }> {
   // `used` holds dedupe keys ("id:<id>" and "nc:<name>@<bucket>") for every
   // concrete stop already locked into this plan. We seed it from any stop
@@ -397,12 +477,24 @@ async function applyToPlan(
     }
     if (candidates.length === 0) continue;
 
-    const pick = pickCandidateForSlot(candidates, used, startCoord, destCoord, isLastStop);
+    const pick = pickCandidateForSlot(candidates, used, startCoord, destCoord, isLastStop, {
+      strategy: options.strategy,
+      usedAcrossPlans: options.usedAcrossPlans,
+      rank: options.planIndex ?? 0,
+    });
     if (!pick) continue;
-    used.add(`id:${pick.id}`);
-    used.add(
-      `nc:${(pick.name || "").trim().toLowerCase().replace(/\s+/g, "")}@${pick.coord.lng.toFixed(3)},${pick.coord.lat.toFixed(3)}`,
-    );
+    const pickIdKey = `id:${pick.id}`;
+    const pickNameKey = `nc:${(pick.name || "").trim().toLowerCase().replace(/\s+/g, "")}@${pick.coord.lng.toFixed(3)},${pick.coord.lat.toFixed(3)}`;
+    used.add(pickIdKey);
+    used.add(pickNameKey);
+    // Soft-record across plans (only for non-terminal slots — the last
+    // station-friendly meal often has limited alternatives, so reusing it is
+    // tolerable). The `isLastStop && station_friendly` exception keeps the
+    // safety-leaning plan from being forced to pick a far-away dinner.
+    if (options.usedAcrossPlans && primary !== "station_friendly") {
+      options.usedAcrossPlans.add(pickIdKey);
+      options.usedAcrossPlans.add(pickNameKey);
+    }
 
     // Build a fresh title that no longer references the original demo name.
     // If the original title contained the old place name (common), substitute
@@ -493,6 +585,18 @@ async function applyToPlan(
     tags.station_arrival_confidence = Math.max(10, tags.station_arrival_confidence - 12);
   }
 
+  // Strategy-specific score shaping. The numbers are intentionally small —
+  // they nudge the score bars apart when content is genuinely different so
+  // the user can see "safer plan == higher safety, deeper plan == higher
+  // experience" instead of three identical bars.
+  if (options.strategy === "low_risk") {
+    tags.station_arrival_confidence = Math.min(100, tags.station_arrival_confidence + 8);
+    tags.experience_score = Math.max(10, tags.experience_score - 6);
+  } else if (options.strategy === "local_experience") {
+    tags.experience_score = Math.min(100, tags.experience_score + 8);
+    tags.station_arrival_confidence = Math.max(10, tags.station_arrival_confidence - 4);
+  }
+
   const sources = new Set<"amap" | "meituan">();
   for (const m of marks) sources.add(m.candidate.source);
 
@@ -536,8 +640,19 @@ export async function applyCandidatesToPlans(
   const newPlans: Plan[] = [];
   let replacedTotal = 0;
   const allSources = new Set<"amap" | "meituan">();
+  // Cross-plan dedupe: a candidate locked into one plan shouldn't be picked
+  // (with full priority) by another. `pickCandidateForSlot` applies a soft
+  // penalty rather than a hard exclude, so plans still fill even when the
+  // pool is small. See `pickCandidateForSlot` for details.
+  const usedAcrossPlans = new Set<string>();
 
-  for (const plan of input.plans) {
+  // Plans get filled in their declared order. We give each plan its own
+  // strategy hint so the candidate scorer can lean toward different POIs:
+  // - balanced: original behavior
+  // - low_risk: destination-leaning, fewer/safer picks
+  // - local_experience: local-depth-leaning, gentler distance penalty
+  for (let i = 0; i < input.plans.length; i++) {
+    const plan = input.plans[i];
     try {
       const r = await applyToPlan(
         plan,
@@ -548,6 +663,11 @@ export async function applyCandidatesToPlans(
         input.parsedConstraints.final_destination,
         departureMin,
         stationBuffer,
+        {
+          strategy: plan.plan_type as PlanStrategy,
+          usedAcrossPlans,
+          planIndex: i,
+        },
       );
       newPlans.push(r.plan);
       replacedTotal += r.replacedCount;
