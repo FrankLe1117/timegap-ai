@@ -470,7 +470,7 @@ function checkFailureProtection(
 ): string | null {
   const safeMin = timeBudget.safe_activity_time_min;
   if (safeMin < 120) {
-    return `仅剩约${Math.floor(safeMin / 60)}小时，考虑到晚高峰和安全余量，建议只在虹桥附近吃一顿饭再休息候车。`;
+    return `仅剩约${Math.floor(safeMin / 60)}小时，考虑到晚高峰和安全余量，建议只在${constraints.final_destination}附近吃一顿饭再休息候车。`;
   }
   if (safeMin < 240 && timeBudget.rush_hour_detected) {
     return `大约${Math.floor(safeMin / 60)}小时的窗口，但晚高峰会占用部分通勤时间，建议控制在1-2个停留点。`;
@@ -538,7 +538,7 @@ export function generateBalancedPlan(
     route_chain: routeChain,
     latest_leave_for_station: timeBudget.latest_leave_for_station,
     risk_note: failureNote || `在${timeBudget.latest_leave_for_station}之前出发前往${constraints.final_destination}即可安全到达。`,
-    backup_suggestion: "如果感觉累了可以跳过咖啡环节，提前到虹桥天地休息。",
+    backup_suggestion: `如果感觉累了可以跳过咖啡环节，提前到${constraints.final_destination}附近休息。`,
     explanation: explanations.join("；") + "。",
     rush_hour_warning: timeBudget.rush_hour_detected ? timeBudget.rush_hour_note : undefined,
   };
@@ -593,7 +593,7 @@ export function generateLowRiskPlan(
     route_chain: buildRouteChain(constraints, timeline),
     latest_leave_for_station: timeBudget.latest_leave_for_station,
     risk_note: "此方案全程靠近终点站，误车风险极低。",
-    backup_suggestion: "如果时间充裕，可以在虹桥天地多逛一会儿。",
+    backup_suggestion: `如果时间充裕，可以在${constraints.final_destination}附近多停留一会儿。`,
     explanation: explanations.join("；") + "。",
     rush_hour_warning: timeBudget.rush_hour_detected ? timeBudget.rush_hour_note : undefined,
   };

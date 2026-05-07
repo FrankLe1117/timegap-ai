@@ -35,7 +35,13 @@ export interface BufferDecision {
   reason: string;
 }
 
-const INTERNATIONAL_HINTS = /国际|international|跨境|t2|2航站楼|海关/i;
+// International intent. The bare phrase "国际机场" (e.g. "广州白云国际机场") is
+// the OFFICIAL Chinese name of most major airports — a domestic flight from
+// PVG/PEK/CAN still has "国际" in the airport's name. So we only treat the
+// terminal as international when the user explicitly signals an international
+// trip (国际航班/出境/海关/护照) or names an international-only sub-terminal
+// (T2 / 2号航站楼). Otherwise we default to domestic_flight.
+const INTERNATIONAL_HINTS = /国际航班|国际线|国际航线|出境|海关|护照|international\s*flight|t2\b|2号航站楼|2航站楼|跨境/i;
 const AIRPORT_HINTS = /机场|airport|航班|飞机|登机|起飞|航站|terminal/i;
 const TRAIN_HINTS = /高铁|动车|火车|车站|站$|高速铁路|铁路|G\d|D\d|hongqiao\s*station|railway|train/i;
 // Common Chinese terminal names which strongly imply airport even without 机场.

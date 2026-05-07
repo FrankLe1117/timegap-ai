@@ -17,9 +17,11 @@
     "smoke-buffer.ts",
     "../src/lib/zh-time.ts",
     "../src/lib/constraint-parser.ts",
+    "../src/lib/city-detect.ts",
     "../src/lib/planner.ts",
     "../src/lib/terminal-buffer.ts",
     "../src/lib/amap-client.ts",
+    "../src/lib/place-sanitize.ts",
     "../src/types/index.ts",
     "../src/data/shanghai_city_graph.json"
   ]
