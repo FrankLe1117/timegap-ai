@@ -98,6 +98,15 @@ export async function enrichPlanWithAmap(input: PlanResponse): Promise<PlanRespo
 
       if (item.activity_type === "transport") {
         totalLegs += 1;
+        // Directional placeholders aren't real POIs — geocoding them lands on
+        // a guessed coordinate and produces a misleading "在高德打开" link.
+        // Skip enrichment entirely; the directional resolver will attach real
+        // route options once it picks a concrete POI (or a search-mode link
+        // when it falls back).
+        if (item.place_kind === "directional" || item.place_kind === "search") {
+          newTimeline.push({ ...item, start_time: minToTime(adjustedStart), end_time: minToTime(adjustedStart + originalDur) });
+          continue;
+        }
         // If the leg's destination already has trusted coords from a real
         // candidate, use them directly; otherwise geocode by name.
         const itemHasTrustedCoords =
@@ -145,6 +154,18 @@ export async function enrichPlanWithAmap(input: PlanResponse): Promise<PlanRespo
       } else {
         const startStr = minToTime(adjustedStart);
         const endStr = minToTime(adjustedStart + originalDur);
+        // Directional / search-mode placeholders are not concrete POIs.
+        // Geocoding their synthetic name ("珠江新城附近一家早茶小馆") lands
+        // on a guessed coordinate and stamps a fake `amap_url` — which then
+        // surfaces as a misleading "在高德打开" link. Pass through unchanged.
+        if (item.place_kind === "directional" || item.place_kind === "search") {
+          newTimeline.push({
+            ...item,
+            start_time: startStr,
+            end_time: endStr,
+          });
+          continue;
+        }
         // If this stop already came from a real candidate (Amap/Meituan) and
         // has its own coords, trust them: do NOT geocode the name again. A
         // name like "上海柏悦酒店" can geocode to an unrelated POI and

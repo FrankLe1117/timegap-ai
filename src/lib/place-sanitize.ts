@@ -27,6 +27,15 @@ import type { Plan, PlanResponse, RouteHop, TimelineItem } from "@/types";
 const SYNTHETIC_TAIL_RE =
   /^.{0,12}(本帮|小馆|餐厅|餐馆|饭馆|食堂|酒楼|小酒馆|酒馆|咖啡店?|咖啡馆|休息点|快餐区|周边日料|日料|小吃|茶馆|书吧|简餐|商务简餐|本帮简餐|本帮菜|本帮菜餐厅|老字号餐厅|晚餐|午餐|早餐)$/u;
 
+/** Long directional placeholders the planner emits for non-Shanghai cities, of
+ *  the form "<area>附近一家<cuisine>小馆/餐馆/餐厅/咖啡馆/茶馆/小吃店". The
+ *  area chunk can be any length and may include parens like
+ *  "珠江新城(地铁站)" — short SYNTHETIC_TAIL_RE's `.{0,12}` cap silently
+ *  misses those, which is how a synthetic name with a tag-style reason
+ *  ("#local_food #dinner") and a fake "在高德打开" link reached the UI. */
+const SYNTHETIC_DIRECTIONAL_RE =
+  /^.+?附近一家.{0,12}(小馆|餐馆|餐厅|饭馆|食堂|酒楼|咖啡馆|咖啡店|茶馆|小吃店|小吃)$/u;
+
 const SYNTHETIC_BARE_RE = /^(本帮|小馆|餐厅|餐馆|饭馆|食堂|酒楼|咖啡|景点|公园|书吧|茶馆|快餐|简餐|小吃)$/u;
 
 /**
@@ -40,6 +49,7 @@ export function isSyntheticConcretePlaceName(name: string | undefined | null): b
   if (!n) return false;
   if (SYNTHETIC_BARE_RE.test(n)) return true;
   if (SYNTHETIC_TAIL_RE.test(n)) return true;
+  if (SYNTHETIC_DIRECTIONAL_RE.test(n)) return true;
   return false;
 }
 
@@ -58,7 +68,12 @@ const COMMERCIAL_ACTIVITIES: ReadonlySet<TimelineItem["activity_type"]> = new Se
 function extractCuisineHint(name: string): string {
   const n = name || "";
   if (/本帮|上海菜/.test(n)) return "本帮菜";
-  if (/粤菜|广府|早茶|茶餐厅|烧腊|顺德/.test(n)) return "粤菜";
+  // 早茶 must be checked before the broader 粤菜 branch — when the planner
+  // emitted "...附近一家早茶小馆", we want the resolver to search 早茶, not
+  // generic 粤菜.
+  if (/早茶/.test(n)) return "早茶";
+  if (/茶餐厅/.test(n)) return "茶餐厅";
+  if (/粤菜|广府|烧腊|顺德/.test(n)) return "粤菜";
   if (/川菜|火锅|串串|麻辣/.test(n)) return "川菜";
   if (/陕菜|肉夹馍|凉皮|羊肉泡馍/.test(n)) return "陕菜";
   if (/杭帮/.test(n)) return "杭帮菜";
@@ -142,6 +157,30 @@ export function sanitizeTimelineItem(
   const fromRealCandidate =
     item.source && item.source !== "demo" && item.candidate_reliability !== "suggested";
   if (fromRealCandidate) return item;
+
+  // Defense-in-depth: a stop that arrived already tagged `place_kind:
+  // "directional"` came from the planner's own emission (e.g. the
+  // non-Shanghai cuisine-keyed stops "珠江新城附近一家早茶小馆"). Its name
+  // and area are *intentional* — preserve them. We only strip raw fields
+  // that could let the UI render a verified-POI link, and we scrub
+  // tag-style reasons so internal metadata doesn't leak.
+  if (item.place_kind === "directional") {
+    const cleanReason =
+      !item.reason || isTagStyleReason(item.reason)
+        ? "演示版未绑定具体店铺，待高德搜索匹配"
+        : item.reason;
+    return {
+      ...item,
+      // Strip every field that could decorate the stop as a verified POI.
+      place_id: undefined,
+      lng: undefined,
+      lat: undefined,
+      amap_url: undefined,
+      candidate_score: undefined,
+      candidate_reliability: undefined,
+      reason: cleanReason,
+    };
+  }
 
   if (!COMMERCIAL_ACTIVITIES.has(item.activity_type)) return item;
   if (!isSyntheticConcretePlaceName(item.place_name)) return item;

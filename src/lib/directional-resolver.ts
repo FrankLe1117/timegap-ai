@@ -34,7 +34,7 @@ import type {
   TimelineItem,
 } from "@/types";
 import { collectUsedKeys, convertStopToDirectional, stopKey } from "./plan-dedupe";
-import { cityNameForAmap } from "./city-detect";
+import { CITY_PROFILES, cityNameForAmap, findProfileByCityName } from "./city-detect";
 import {
   generalizeCuisine,
   isShanghaiCuisine,
@@ -163,16 +163,44 @@ const GENERIC_CATEGORIES: Record<string, string[]> = {
 
 /**
  * Extract `{area, category, activity}` from a directional TimelineItem. The
- * `place_name` was emitted by `buildDirectionalText` in place-sanitize.ts;
- * we reverse-engineer it back into structured intent.
+ * `place_name` was emitted by `buildDirectionalText` in place-sanitize.ts or
+ * by the non-Shanghai planner ("珠江新城(地铁站)附近一家早茶小馆"); we
+ * reverse-engineer it back into structured intent.
+ *
+ * `cityLabel` (optional) lets us match anchors from the user's actual city
+ * profile (Guangzhou's 珠江新城 / 天河 / 沙面…) instead of the hard-coded
+ * Shanghai-only KNOWN_AREAS/LANDMARKS lists. Without it we fall back to the
+ * Shanghai-only behavior — kept for backwards compatibility with older
+ * callers and tests.
  */
-export function extractDirectionalIntent(item: TimelineItem): DirectionalIntent {
+export function extractDirectionalIntent(
+  item: TimelineItem,
+  cityLabel?: string | null,
+): DirectionalIntent {
   const text = `${item.title || ""} ${item.place_name || ""}`;
   let area: string | undefined;
-  for (const a of KNOWN_AREAS) {
-    if (text.includes(a)) {
-      area = a;
-      break;
+
+  // 1. "<area>附近一家..." — the planner's own emission shape. The chunk
+  //    immediately before "附近" is the area, possibly with parens like
+  //    "珠江新城(地铁站)". Prefer this over the static KNOWN_AREAS lookup
+  //    because it correctly handles non-Shanghai areas.
+  const m = text.match(/([一-鿿A-Za-z0-9·•\-()()]+)附近一家/);
+  if (m && m[1]) {
+    // Strip any trailing parenthesized qualifier so we search "珠江新城" rather
+    // than "珠江新城(地铁站)" — Amap's around/text APIs match better on the
+    // bare landmark name.
+    const raw = m[1].trim();
+    const stripped = raw.replace(/[（(][^（()）]*[)）]\s*$/u, "").trim();
+    if (stripped) area = stripped;
+  }
+
+  // 2. Static Shanghai-only fallback list — only consulted if step 1 missed.
+  if (!area) {
+    for (const a of KNOWN_AREAS) {
+      if (text.includes(a)) {
+        area = a;
+        break;
+      }
     }
   }
   if (!area) {
@@ -180,6 +208,32 @@ export function extractDirectionalIntent(item: TimelineItem): DirectionalIntent 
       if (text.includes(lm)) {
         area = lm;
         break;
+      }
+    }
+  }
+
+  // 3. City-profile anchors. If we resolved a city profile (Guangzhou,
+  //    Beijing, …), let any of its non-terminal anchors match too.
+  if (!area && cityLabel) {
+    const profile =
+      findProfileByCityName(cityLabel) ||
+      Object.values(CITY_PROFILES).find(
+        (p) =>
+          p.zh === cityLabel ||
+          p.en.toLowerCase() === String(cityLabel).toLowerCase() ||
+          p.key === String(cityLabel).toLowerCase(),
+      );
+    if (profile) {
+      for (const anchor of profile.anchors) {
+        if (anchor.terminal) continue;
+        const sortedAliases = [...anchor.aliases].sort((x, y) => y.length - x.length);
+        for (const al of sortedAliases) {
+          if (text.includes(al)) {
+            area = anchor.name;
+            break;
+          }
+        }
+        if (area) break;
       }
     }
   }
@@ -703,10 +757,17 @@ async function resolvePlan(
   city: string,
   deps: AmapSearchDeps,
   cuisineHints: string[] = [],
-): Promise<{ plan: Plan; resolvedCount: number; manualConfirmCount: number }> {
+  planIndex = 0,
+): Promise<{
+  plan: Plan;
+  resolvedCount: number;
+  manualConfirmCount: number;
+  diagnostics: MealResolutionDiagnostic[];
+}> {
   const rewrites: ResolutionRewrite[] = [];
   const manualRewrites: ManualConfirmRewrite[] = [];
   const newTimeline: TimelineItem[] = [];
+  const diagnostics: MealResolutionDiagnostic[] = [];
 
   // Track an anchor coord we can pass to nearby search. Initially the start
   // coord; updated as we walk past stops with known coords.
@@ -727,7 +788,9 @@ async function resolvePlan(
       continue;
     }
 
-    const intent = extractDirectionalIntent(item);
+    const intent = extractDirectionalIntent(item, city);
+    const oldName = item.place_name;
+    const stopIdxForDiag = newTimeline.length;
     let poi: AmapPoi | null = null;
     try {
       poi = await resolveDirectionalStop(intent, anchor, city, deps, usedKeys, {
@@ -748,7 +811,6 @@ async function resolvePlan(
         item.activity_type === "dinner" ||
         item.activity_type === "coffee";
       if (isMeal) {
-        const oldName = item.place_name;
         // Prefer a precise cuisine for the search keyword: the directional
         // intent's category if specific, then any user-supplied hint, then
         // bare "餐厅"/"咖啡馆".
@@ -773,8 +835,27 @@ async function resolvePlan(
           newName: manual.place_name,
         });
         newTimeline.push(manual);
+        diagnostics.push({
+          planIndex,
+          stopIndex: stopIdxForDiag,
+          activity: item.activity_type,
+          oldName,
+          outcome: manual.place_kind === "search" ? "search" : "directional",
+          intentArea: intent.area,
+          intentCategory: intent.category,
+          searchQuery: manual.search_query,
+        });
       } else {
         newTimeline.push(item);
+        diagnostics.push({
+          planIndex,
+          stopIndex: stopIdxForDiag,
+          activity: item.activity_type,
+          oldName,
+          outcome: "directional",
+          intentArea: intent.area,
+          intentCategory: intent.category,
+        });
       }
       continue;
     }
@@ -784,6 +865,15 @@ async function resolvePlan(
       oldName: item.place_name,
       newName: rebuilt.place_name,
       coord: poi.coord,
+    });
+    diagnostics.push({
+      planIndex,
+      stopIndex: stopIdxForDiag,
+      activity: item.activity_type,
+      oldName,
+      outcome: "poi",
+      intentArea: intent.area,
+      intentCategory: intent.category,
     });
     // Stamp the resolved POI into both keys-used and the rebuilt stop's
     // dedupe key so subsequent slots can't pick it again.
@@ -795,7 +885,7 @@ async function resolvePlan(
   }
 
   if (rewrites.length === 0 && manualRewrites.length === 0) {
-    return { plan, resolvedCount: 0, manualConfirmCount: 0 };
+    return { plan, resolvedCount: 0, manualConfirmCount: 0, diagnostics };
   }
 
   // Patch the transport leg that immediately precedes each resolved stop.
@@ -902,6 +992,7 @@ async function resolvePlan(
     plan: { ...plan, timeline: patched, route_chain },
     resolvedCount: rewrites.length,
     manualConfirmCount: manualRewrites.length,
+    diagnostics,
   };
 }
 
@@ -918,12 +1009,37 @@ export interface DirectionalResolveOptions {
   cuisineHints?: string[];
 }
 
+/**
+ * Per-stop resolution diagnostics. Surfaced in dataSources.mealResolution so
+ * developers (and noisy-debug-aware UIs) can see why a particular meal stop
+ * fell back to a search-mode placeholder. Never rendered to end users.
+ */
+export interface MealResolutionDiagnostic {
+  planIndex: number;
+  stopIndex: number;
+  activity: TimelineItem["activity_type"];
+  /** Original directional `place_name` before resolution. */
+  oldName: string;
+  /** Final state: "poi" when a concrete POI was selected, "search" when we
+   *  fell back to a search-mode placeholder, "directional" for non-meal
+   *  directionals that stayed unresolved. */
+  outcome: "poi" | "search" | "directional";
+  /** Cuisine + area used to drive the search ladder. */
+  intentArea?: string;
+  intentCategory: string;
+  /** When outcome==="search", the keyword we sent to Amap's search URL. */
+  searchQuery?: string;
+}
+
 export interface DirectionalResolveResult {
   response: PlanResponse;
   resolvedTotal: number;
   /** Count of meal/coffee directionals that Amap could not resolve and were
    *  upgraded to the explicit "需要手动确认餐馆/咖啡馆" placeholder. */
   manualConfirmTotal: number;
+  /** Per-stop diagnostics — one entry per meal/coffee directional we
+   *  attempted to resolve. Empty when no directionals were present. */
+  mealDiagnostics: MealResolutionDiagnostic[];
 }
 
 /**
@@ -952,7 +1068,7 @@ export async function resolveDirectionalSuggestions(
   // we have no way to look anything up — bail out cheaply.
   const usingDefaultDeps = deps === DEFAULT_DEPS;
   if (usingDefaultDeps && !isAmapConfigured()) {
-    return { response, resolvedTotal: 0, manualConfirmTotal: 0 };
+    return { response, resolvedTotal: 0, manualConfirmTotal: 0, mealDiagnostics: [] };
   }
 
   const city =
@@ -969,13 +1085,16 @@ export async function resolveDirectionalSuggestions(
 
   let resolvedTotal = 0;
   let manualConfirmTotal = 0;
+  const allDiagnostics: MealResolutionDiagnostic[] = [];
   const newPlans: Plan[] = [];
-  for (const plan of response.plans) {
+  for (let p = 0; p < response.plans.length; p++) {
+    const plan = response.plans[p];
     try {
-      const r = await resolvePlan(plan, startCoord, city, deps, cuisineHints);
+      const r = await resolvePlan(plan, startCoord, city, deps, cuisineHints, p);
       newPlans.push(r.plan);
       resolvedTotal += r.resolvedCount;
       manualConfirmTotal += r.manualConfirmCount;
+      allDiagnostics.push(...r.diagnostics);
     } catch (err) {
       console.warn("[directional-resolver] plan failed, keeping original:", err);
       newPlans.push(plan);
@@ -983,7 +1102,12 @@ export async function resolveDirectionalSuggestions(
   }
 
   if (resolvedTotal === 0 && manualConfirmTotal === 0) {
-    return { response, resolvedTotal: 0, manualConfirmTotal: 0 };
+    return {
+      response,
+      resolvedTotal: 0,
+      manualConfirmTotal: 0,
+      mealDiagnostics: allDiagnostics,
+    };
   }
 
   // Only flip dataSources when we actually used Amap to confirm a POI. A pure
@@ -1007,5 +1131,6 @@ export async function resolveDirectionalSuggestions(
     response: next,
     resolvedTotal,
     manualConfirmTotal,
+    mealDiagnostics: allDiagnostics,
   };
 }

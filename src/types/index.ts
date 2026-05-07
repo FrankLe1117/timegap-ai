@@ -241,6 +241,26 @@ export interface PlanResponse {
     candidatesUsed?: boolean;
     /** Distinct candidate sources represented in plans, e.g. ["amap"]. */
     candidateSources?: Array<"amap" | "meituan">;
+    /** Diagnostic breakdown of meal/coffee directional resolution. Populated
+     *  when the directional resolver ran. Never user-facing; surfaced here so
+     *  developers can see why a particular meal slot fell back to search-mode
+     *  without polluting the timeline reason text. */
+    mealResolution?: {
+      attempted: number;
+      poiResolved: number;
+      searchFallback: number;
+      directionalKept: number;
+      details: Array<{
+        planIndex: number;
+        stopIndex: number;
+        activity: TimelineItem["activity_type"];
+        oldName: string;
+        outcome: "poi" | "search" | "directional";
+        intentArea?: string;
+        intentCategory: string;
+        searchQuery?: string;
+      }>;
+    };
   };
 }
 

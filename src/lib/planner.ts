@@ -270,6 +270,14 @@ function buildNonShanghaiDirectionalStops(
   return out;
 }
 
+/** True when the stop came from `buildNonShanghaiDirectionalStops` — its node
+ *  id is "dir_lunch"/"dir_dinner", not a real city-graph id. The bare regex on
+ *  `place-sanitize` cannot detect long names like "珠江新城(地铁站)附近一家
+ *  早茶小馆" (>12 chars), so we mark them directional explicitly here. */
+function isSyntheticDirectionalNode(node: CityGraphNode): boolean {
+  return typeof node.id === "string" && node.id.startsWith("dir_");
+}
+
 function buildTimeline(
   constraints: Constraints,
   timeBudget: TimeBudget,
@@ -281,6 +289,7 @@ function buildTimeline(
 
   for (const stop of stops) {
     const travel = getTravelTime(currentLocation, stop.node.name, currentMin);
+    const stopIsDirectional = isSyntheticDirectionalNode(stop.node);
 
     if (travel.minutes > 0) {
       const arrivalMin = currentMin + travel.minutes;
@@ -295,22 +304,37 @@ function buildTimeline(
         estimated_travel_time_to_next_min: null,
         travel_mode: travel.mode,
         is_rush_hour: travel.isRush,
-        route_options: buildRouteOptions(currentLocation, stop.node.name),
+        // Directional placeholders aren't real POIs — driving/transit links to
+        // them would jump to a guessed coordinate. Skip route_options; the
+        // directional resolver will attach real ones once it picks a concrete
+        // POI (or attach a search-mode link when it falls back).
+        route_options: stopIsDirectional
+          ? undefined
+          : buildRouteOptions(currentLocation, stop.node.name),
+        place_kind: stopIsDirectional ? "directional" : undefined,
       });
       currentMin = arrivalMin;
     }
 
     const duration = stop.node.suggested_duration_min;
     const endMin = currentMin + duration;
+    // Reason: tag-style "#local_food #dinner" leaks internal metadata into the
+    // UI. For directional placeholders we instead emit a user-facing string;
+    // demo-graph stops keep the legacy tag reason because they're typically
+    // upgraded later by enrichment / candidate replacement.
+    const stopReason = stopIsDirectional
+      ? "演示版未绑定具体店铺，待高德搜索匹配"
+      : stop.node.tags.slice(0, 3).map((t) => `#${t}`).join(" ");
     timeline.push({
       start_time: minToTime(currentMin),
       end_time: minToTime(endMin),
       title: stop.label,
       place_name: stop.node.name,
-      place_id: stop.node.id,
+      place_id: stopIsDirectional ? undefined : stop.node.id,
       activity_type: stop.activityType,
-      reason: stop.node.tags.slice(0, 3).map((t) => `#${t}`).join(" "),
+      reason: stopReason,
       estimated_travel_time_to_next_min: null,
+      place_kind: stopIsDirectional ? "directional" : undefined,
     });
     currentMin = endMin;
     currentLocation = stop.node.name;

@@ -23,6 +23,7 @@ const eslintConfig = defineConfig([
     "scripts/run-smoke-city.cjs",
     "scripts/run-smoke-amap-resolver.cjs",
     "scripts/run-smoke-city-cuisine.cjs",
+    "scripts/run-smoke-guangzhou-directional.cjs",
   ]),
 ]);
 

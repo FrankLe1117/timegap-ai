@@ -185,6 +185,34 @@ export async function POST(request: NextRequest) {
           startCoord,
         });
         sanitized = resolved.response;
+        if (resolved.mealDiagnostics.length > 0) {
+          const details = resolved.mealDiagnostics;
+          const poiResolved = details.filter((d) => d.outcome === "poi").length;
+          const searchFallback = details.filter((d) => d.outcome === "search").length;
+          const directionalKept = details.filter((d) => d.outcome === "directional").length;
+          sanitized = {
+            ...sanitized,
+            dataSources: {
+              ...sanitized.dataSources,
+              mealResolution: {
+                attempted: details.length,
+                poiResolved,
+                searchFallback,
+                directionalKept,
+                details,
+              },
+            },
+          };
+          if (process.env.NODE_ENV !== "production") {
+            console.info("[plan] meal-resolution", {
+              attempted: details.length,
+              poiResolved,
+              searchFallback,
+              directionalKept,
+              details,
+            });
+          }
+        }
       } catch (err) {
         console.warn("[plan] Directional resolution failed, keeping suggestions:", err);
       }
