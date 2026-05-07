@@ -93,7 +93,13 @@ export async function enrichPlanWithAmap(input: PlanResponse): Promise<PlanRespo
 
       if (item.activity_type === "transport") {
         totalLegs += 1;
-        const toPoi = await resolvePlace(item.place_name, cache);
+        // If the leg's destination already has trusted coords from a real
+        // candidate, use them directly; otherwise geocode by name.
+        const itemHasTrustedCoords =
+          item.source && item.source !== "demo" && item.lng != null && item.lat != null;
+        const toPoi = itemHasTrustedCoords
+          ? { id: item.place_id || `cand:${item.place_name}`, name: item.place_name, coord: { lng: item.lng!, lat: item.lat! } }
+          : await resolvePlace(item.place_name, cache);
         let newDur = originalDur;
         let amapHit = false;
         if (prevPoi && toPoi) {
@@ -133,19 +139,40 @@ export async function enrichPlanWithAmap(input: PlanResponse): Promise<PlanRespo
       } else {
         const startStr = minToTime(adjustedStart);
         const endStr = minToTime(adjustedStart + originalDur);
-        const poi = item.activity_type === "station_buffer" ? prevPoi : await resolvePlace(item.place_name, cache);
+        // If this stop already came from a real candidate (Amap/Meituan) and
+        // has its own coords, trust them: do NOT geocode the name again. A
+        // name like "上海柏悦酒店" can geocode to an unrelated POI and
+        // silently desync coords/url from the displayed name.
+        const isResolvedCandidate =
+          item.source && item.source !== "demo" && item.lng != null && item.lat != null;
+        const poi = isResolvedCandidate
+          ? null
+          : item.activity_type === "station_buffer"
+            ? prevPoi
+            : await resolvePlace(item.place_name, cache);
+        const stopLng = isResolvedCandidate ? item.lng : poi?.coord.lng;
+        const stopLat = isResolvedCandidate ? item.lat : poi?.coord.lat;
+        const stopAmapUrl = isResolvedCandidate
+          ? item.amap_url ||
+            (item.lng != null && item.lat != null
+              ? buildAmapMarkerUrl(item.place_name, { lng: item.lng, lat: item.lat })
+              : buildAmapSearchUrl(item.place_name))
+          : poi
+            ? buildAmapMarkerUrl(item.place_name, poi.coord)
+            : buildAmapSearchUrl(item.place_name);
         const updated: TimelineItem = {
           ...item,
           start_time: startStr,
           end_time: endStr,
-          lng: poi?.coord.lng,
-          lat: poi?.coord.lat,
-          amap_url: poi
-            ? buildAmapMarkerUrl(item.place_name, poi.coord)
-            : buildAmapSearchUrl(item.place_name),
+          lng: stopLng,
+          lat: stopLat,
+          amap_url: stopAmapUrl,
         };
         newTimeline.push(updated);
-        if (poi && item.activity_type !== "station_buffer") {
+        if (isResolvedCandidate && item.lng != null && item.lat != null) {
+          prevPoi = { id: item.place_id || `cand:${item.place_name}`, name: item.place_name, coord: { lng: item.lng, lat: item.lat } };
+          prevPlace = item.place_name;
+        } else if (poi && item.activity_type !== "station_buffer") {
           prevPoi = poi;
           prevPlace = item.place_name;
         }

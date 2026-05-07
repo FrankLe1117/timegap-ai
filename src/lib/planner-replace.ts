@@ -23,7 +23,14 @@ import {
   RouteHop,
   TimelineItem,
 } from "@/types";
-import { AmapCoord, estimateRoute, isAmapConfigured } from "./amap-client";
+import {
+  AmapCoord,
+  buildAmapMarkerUrl,
+  buildAmapNavigationUrl,
+  buildAmapSearchUrl,
+  estimateRoute,
+  isAmapConfigured,
+} from "./amap-client";
 
 const RUSH_WINDOWS: Array<[number, number]> = [
   [450, 570],
@@ -189,6 +196,18 @@ async function rebuildTimelineWithCoords(
 
     const tStart = cursor;
     const tEnd = tStart + travelMin;
+    // Build a navigation-style amap_url for the leg whose endpoint coords we
+    // know. When only the destination coord is known we fall back to a marker
+    // URL on that destination; without any coord we fall back to a keyword
+    // search on the destination's displayed name. This keeps the leg's
+    // amap_url consistent with the upcoming stop's identity.
+    const transportAmapUrl = (() => {
+      if (prevCoord && toCoord) {
+        return buildAmapNavigationUrl(prevCoord, toCoord, s.item.place_name);
+      }
+      if (toCoord) return buildAmapMarkerUrl(s.item.place_name, toCoord);
+      return buildAmapSearchUrl(s.item.place_name);
+    })();
     const transportItem: TimelineItem = {
       start_time: minToTime(tStart),
       end_time: minToTime(tEnd),
@@ -202,6 +221,7 @@ async function rebuildTimelineWithCoords(
       is_rush_hour: isRushMin(tStart),
       lng: toCoord?.lng,
       lat: toCoord?.lat,
+      amap_url: transportAmapUrl,
     };
     newTimeline.push(transportItem);
     chain.push({
@@ -216,6 +236,9 @@ async function rebuildTimelineWithCoords(
 
     const stopStart = cursor;
     const stopEnd = cursor + s.duration;
+    // Preserve the replaced item's identity: name, coords, amap_url, source,
+    // candidate_score all come from `s.item` (which already reflects the
+    // candidate). We only refresh times here.
     const stopItem: TimelineItem = {
       ...s.item,
       start_time: minToTime(stopStart),
@@ -251,6 +274,11 @@ async function rebuildTimelineWithCoords(
   }
   const fStart = cursor;
   const fEnd = fStart + finalTravel;
+  const finalAmapUrl = (() => {
+    if (prevCoord && destCoord) return buildAmapNavigationUrl(prevCoord, destCoord, destinationName);
+    if (destCoord) return buildAmapMarkerUrl(destinationName, destCoord);
+    return origFinal?.amap_url || buildAmapSearchUrl(destinationName);
+  })();
   newTimeline.push({
     start_time: minToTime(fStart),
     end_time: minToTime(fEnd),
@@ -264,6 +292,7 @@ async function rebuildTimelineWithCoords(
     is_rush_hour: isRushMin(fStart),
     lng: destCoord?.lng,
     lat: destCoord?.lat,
+    amap_url: finalAmapUrl,
   });
   chain.push({
     from: prevName,
@@ -275,13 +304,21 @@ async function rebuildTimelineWithCoords(
   });
   cursor = fEnd;
 
-  // Re-add station buffer up to original departure time.
+  // Re-add station buffer up to original departure time. The buffer happens
+  // at the destination, so its coords/url should track the destination — not
+  // some stale name from before replacement.
   if (stationBuffer) {
     const departMin = timeToMin(stationBuffer.end_time);
+    const bufferAmapUrl = destCoord
+      ? buildAmapMarkerUrl(destinationName, destCoord)
+      : stationBuffer.amap_url || buildAmapSearchUrl(destinationName);
     newTimeline.push({
       ...stationBuffer,
       start_time: minToTime(cursor),
       end_time: minToTime(Math.max(departMin, cursor)),
+      lng: destCoord?.lng ?? stationBuffer.lng,
+      lat: destCoord?.lat ?? stationBuffer.lat,
+      amap_url: bufferAmapUrl,
     });
   }
 
@@ -340,15 +377,28 @@ async function applyToPlan(
     if (!pick) continue;
     used.add(pick.id);
 
+    // Build a fresh title that no longer references the original demo name.
+    // If the original title contained the old place name (common), substitute
+    // the candidate name; otherwise prepend the candidate name to keep the
+    // displayed text and the underlying place identity in sync.
+    const newTitle = it.title.includes(it.place_name)
+      ? it.title.replace(it.place_name, pick.name)
+      : pick.name;
+    // The amap_url is derived from the candidate's own coord+name so the
+    // navigation link always matches the displayed place. We build it here
+    // (instead of letting enrich overwrite later) because enrichment runs
+    // before replacement and would otherwise still point at the demo place.
+    const candidateUrl = buildAmapMarkerUrl(pick.name, pick.coord);
     newTimeline[i] = {
       ...it,
-      title: it.title.replace(it.place_name, pick.name),
+      title: newTitle,
       place_name: pick.name,
       place_id: pick.id,
       lng: pick.coord.lng,
       lat: pick.coord.lat,
       source: pick.source,
       candidate_score: pick.score,
+      amap_url: candidateUrl,
       reason: pick.district
         ? `${pick.district}・${primary === "station_friendly" ? "靠近车站候选" : "高德候选点"}`
         : `高德候选点（${primary}）`,

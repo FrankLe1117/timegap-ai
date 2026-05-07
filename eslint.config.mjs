@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Smoke test build artifacts and the cjs runner are not part of the
+    // shipped Next.js bundle.
+    ".smoke-build/**",
+    "scripts/run-smoke.cjs",
   ]),
 ]);
 
