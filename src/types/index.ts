@@ -203,24 +203,3 @@ export interface PlanResponse {
   };
 }
 
-export interface CalendarEvent {
-  id: string;
-  title: string;
-  location: string;
-  start_time: string;
-  end_time: string;
-  date: string;
-}
-
-export interface FreeWindow {
-  start_time: string;
-  end_time: string;
-  duration_min: number;
-  between: string;
-  is_gap: boolean;
-}
-
-export interface MockCalendar {
-  calendar_events: CalendarEvent[];
-  free_windows: FreeWindow[];
-}

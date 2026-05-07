@@ -3,8 +3,8 @@
 import { useState, useCallback } from "react";
 import ChatPanel from "@/components/ChatPanel";
 import ItineraryBoard from "@/components/ItineraryBoard";
-import MockCalendar from "@/components/MockCalendar";
-import { PlanResponse, Plan, FreeWindow, ParseResult } from "@/types";
+import TripConstraintsPanel from "@/components/TripConstraintsPanel";
+import { PlanResponse, Plan, ParseResult } from "@/types";
 
 interface Message {
   role: "user" | "assistant";
@@ -21,7 +21,7 @@ export default function Home() {
   const [planData, setPlanData] = useState<PlanResponse | null>(null);
   const [previousPlans, setPreviousPlans] = useState<Plan[] | undefined>();
   const [loading, setLoading] = useState(false);
-  const [showCalendar, setShowCalendar] = useState(true);
+  const [showConstraintsPanel, setShowConstraintsPanel] = useState(true);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [pendingClarification, setPendingClarification] = useState<PendingClarification | null>(null);
 
@@ -134,15 +134,6 @@ export default function Home() {
     await callPlanApi(pendingClarification.originalInput, undefined, true, pendingClarification.originalInput);
   }, [pendingClarification, callPlanApi]);
 
-  const handleCalendarSelect = useCallback(
-    (window: FreeWindow) => {
-      const input = `今天是出差最后一天，我${window.start_time}在陆家嘴结束会议，晚上22:00从虹桥火车站坐高铁返程。帮我规划这段空档。`;
-      setShowCalendar(false);
-      handlePlan(input);
-    },
-    [handlePlan],
-  );
-
   const handleSelectPlan = useCallback((planType: string) => {
     setSelectedPlan((prev) => (prev === planType ? null : planType));
   }, []);
@@ -247,19 +238,22 @@ export default function Home() {
                 }
               />
             </div>
-            {showCalendar ? (
+            {showConstraintsPanel ? (
               <div className="shrink-0">
-                <MockCalendar onSelectWindow={handleCalendarSelect} />
+                <TripConstraintsPanel
+                  data={planData}
+                  onClose={() => setShowConstraintsPanel(false)}
+                />
               </div>
             ) : (
               <button
-                onClick={() => setShowCalendar(true)}
+                onClick={() => setShowConstraintsPanel(true)}
                 className="shrink-0 w-full text-xs px-3 py-2 bg-white border border-slate-200 hover:border-blue-300 hover:text-blue-700 text-slate-600 rounded-xl transition-colors flex items-center justify-center gap-1.5"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                查看今日日程
+                展开尾程约束
               </button>
             )}
           </div>
