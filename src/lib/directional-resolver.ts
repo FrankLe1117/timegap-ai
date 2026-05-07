@@ -33,7 +33,7 @@ import type {
   RouteHop,
   TimelineItem,
 } from "@/types";
-import { collectUsedKeys, stopKey } from "./plan-dedupe";
+import { collectUsedKeys, convertStopToDirectional, stopKey } from "./plan-dedupe";
 
 /** Build the dedupe key Amap POIs map to. Mirrors `stopKey` for resolved stops:
  *  prefer the real upstream id, otherwise normalized name + ~110 m bucket. */
@@ -472,6 +472,14 @@ interface ResolutionRewrite {
   coord: AmapCoord;
 }
 
+/** Index of an unresolved meal/coffee directional that we converted to a
+ *  manual-confirm placeholder. Used to patch the transport leg that feeds it. */
+interface ManualConfirmRewrite {
+  stopIndex: number;
+  oldName: string;
+  newName: string;
+}
+
 /** Apply Amap-resolved POIs to a single plan. Returns the patched plan. */
 async function resolvePlan(
   plan: Plan,
@@ -479,8 +487,9 @@ async function resolvePlan(
   city: string,
   deps: AmapSearchDeps,
   cuisineHints: string[] = [],
-): Promise<{ plan: Plan; resolvedCount: number }> {
+): Promise<{ plan: Plan; resolvedCount: number; manualConfirmCount: number }> {
   const rewrites: ResolutionRewrite[] = [];
+  const manualRewrites: ManualConfirmRewrite[] = [];
   const newTimeline: TimelineItem[] = [];
 
   // Track an anchor coord we can pass to nearby search. Initially the start
@@ -513,7 +522,26 @@ async function resolvePlan(
       poi = null;
     }
     if (!poi) {
-      newTimeline.push(item);
+      // No reliable POI found. For meal/coffee directionals, when Amap is
+      // reachable (we just queried it), upgrade the placeholder to the explicit
+      // "需要手动确认餐馆/咖啡馆" wording so the user knows the tool tried but
+      // couldn't pick — instead of leaving the generic "找一家本帮菜小馆" text.
+      const isMeal =
+        item.activity_type === "lunch" ||
+        item.activity_type === "dinner" ||
+        item.activity_type === "coffee";
+      if (isMeal) {
+        const oldName = item.place_name;
+        const manual = convertStopToDirectional(item, { mealManualConfirm: true });
+        manualRewrites.push({
+          stopIndex: newTimeline.length,
+          oldName,
+          newName: manual.place_name,
+        });
+        newTimeline.push(manual);
+      } else {
+        newTimeline.push(item);
+      }
       continue;
     }
     const rebuilt = rebuildStopFromPoi(item, poi);
@@ -532,8 +560,8 @@ async function resolvePlan(
     newTimeline.push(rebuilt);
   }
 
-  if (rewrites.length === 0) {
-    return { plan, resolvedCount: 0 };
+  if (rewrites.length === 0 && manualRewrites.length === 0) {
+    return { plan, resolvedCount: 0, manualConfirmCount: 0 };
   }
 
   // Patch the transport leg that immediately precedes each resolved stop.
@@ -545,6 +573,8 @@ async function resolvePlan(
   // patch would rewrite both legs, even though only one was resolved.
   const rewriteByStopIndex = new Map<number, ResolutionRewrite>();
   for (const r of rewrites) rewriteByStopIndex.set(r.stopIndex, r);
+  const manualByStopIndex = new Map<number, ManualConfirmRewrite>();
+  for (const r of manualRewrites) manualByStopIndex.set(r.stopIndex, r);
   type StopCoord = { name: string; coord?: AmapCoord };
   let prev: StopCoord = { name: "", coord: startCoord ?? undefined };
   const patched: TimelineItem[] = [];
@@ -552,6 +582,7 @@ async function resolvePlan(
     const it = newTimeline[idx];
     if (it.activity_type === "transport") {
       const rw = rewriteByStopIndex.get(idx + 1);
+      const mw = manualByStopIndex.get(idx + 1);
       if (rw) {
         const newCoord = rw.coord;
         const navUrl = prev.coord
@@ -572,6 +603,21 @@ async function resolvePlan(
             newCoord,
           ),
         });
+      } else if (mw) {
+        // Transport leg now feeds a manual-confirm placeholder. Strip every
+        // nav affordance so the UI doesn't render a fake "在高德打开" or a
+        // misleading route option pointing at the placeholder string.
+        patched.push({
+          ...it,
+          title: `前往${mw.newName}`,
+          place_name: mw.newName,
+          place_kind: "directional",
+          place_id: undefined,
+          lng: undefined,
+          lat: undefined,
+          amap_url: undefined,
+          route_options: undefined,
+        });
       } else {
         patched.push(it);
       }
@@ -587,21 +633,26 @@ async function resolvePlan(
     patched.push(it);
   }
 
-  // Patch route_chain similarly.
+  // Patch route_chain similarly. Both POI replacements and manual-confirm
+  // rewrites need their old place_name updated so chain stays consistent.
+  const renameByOld = new Map<string, string>();
+  for (const r of rewrites) renameByOld.set(r.oldName, r.newName);
+  for (const r of manualRewrites) renameByOld.set(r.oldName, r.newName);
   const route_chain: RouteHop[] = plan.route_chain.map((hop) => {
-    const fromR = rewrites.find((r) => r.oldName === hop.from);
-    const toR = rewrites.find((r) => r.oldName === hop.to);
+    const fromR = renameByOld.get(hop.from);
+    const toR = renameByOld.get(hop.to);
     if (!fromR && !toR) return hop;
     return {
       ...hop,
-      from: fromR ? fromR.newName : hop.from,
-      to: toR ? toR.newName : hop.to,
+      from: fromR ? fromR : hop.from,
+      to: toR ? toR : hop.to,
     };
   });
 
   return {
     plan: { ...plan, timeline: patched, route_chain },
     resolvedCount: rewrites.length,
+    manualConfirmCount: manualRewrites.length,
   };
 }
 
@@ -621,6 +672,9 @@ export interface DirectionalResolveOptions {
 export interface DirectionalResolveResult {
   response: PlanResponse;
   resolvedTotal: number;
+  /** Count of meal/coffee directionals that Amap could not resolve and were
+   *  upgraded to the explicit "需要手动确认餐馆/咖啡馆" placeholder. */
+  manualConfirmTotal: number;
 }
 
 /**
@@ -631,7 +685,11 @@ export interface DirectionalResolveResult {
  * - Returns the input unchanged when AMAP_API_KEY is missing OR no `deps`
  *   override was supplied that bypasses the gate.
  * - Each plan is independent: a failure on one does not affect others.
- * - Directional stops that don't resolve are kept directional (no map link).
+ * - Directional meal/coffee stops that don't resolve are upgraded to a clear
+ *   "需要手动确认餐馆/咖啡馆" manual-confirm placeholder (since Amap was
+ *   reachable — we just queried it). This avoids leaving the user with the
+ *   generic "找一家本帮菜小馆" suggestion text. Non-meal directionals are
+ *   left as-is.
  *
  * Idempotent — once a stop has `place_kind === "poi"` it's no longer a
  * directional candidate and is skipped.
@@ -645,7 +703,7 @@ export async function resolveDirectionalSuggestions(
   // we have no way to look anything up — bail out cheaply.
   const usingDefaultDeps = deps === DEFAULT_DEPS;
   if (usingDefaultDeps && !isAmapConfigured()) {
-    return { response, resolvedTotal: 0 };
+    return { response, resolvedTotal: 0, manualConfirmTotal: 0 };
   }
 
   const city = opts.city || response.parsedConstraints.city || "上海";
@@ -658,35 +716,44 @@ export async function resolveDirectionalSuggestions(
   ).filter((s) => typeof s === "string" && s.trim().length > 0);
 
   let resolvedTotal = 0;
+  let manualConfirmTotal = 0;
   const newPlans: Plan[] = [];
   for (const plan of response.plans) {
     try {
       const r = await resolvePlan(plan, startCoord, city, deps, cuisineHints);
       newPlans.push(r.plan);
       resolvedTotal += r.resolvedCount;
+      manualConfirmTotal += r.manualConfirmCount;
     } catch (err) {
       console.warn("[directional-resolver] plan failed, keeping original:", err);
       newPlans.push(plan);
     }
   }
 
-  if (resolvedTotal === 0) {
-    return { response, resolvedTotal: 0 };
+  if (resolvedTotal === 0 && manualConfirmTotal === 0) {
+    return { response, resolvedTotal: 0, manualConfirmTotal: 0 };
   }
 
-  const sources = new Set(response.dataSources.candidateSources || []);
-  sources.add("amap");
-
-  return {
-    response: {
-      ...response,
-      plans: newPlans,
+  // Only flip dataSources when we actually used Amap to confirm a POI. A pure
+  // manual-confirm pass means Amap was queried but produced nothing usable —
+  // not the same as "amap candidates landed in the plan".
+  let next: PlanResponse = { ...response, plans: newPlans };
+  if (resolvedTotal > 0) {
+    const sources = new Set(response.dataSources.candidateSources || []);
+    sources.add("amap");
+    next = {
+      ...next,
       dataSources: {
         ...response.dataSources,
         candidatesUsed: true,
         candidateSources: Array.from(sources),
       },
-    },
+    };
+  }
+
+  return {
+    response: next,
     resolvedTotal,
+    manualConfirmTotal,
   };
 }

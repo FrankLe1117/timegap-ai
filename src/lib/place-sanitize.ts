@@ -106,6 +106,25 @@ function buildDirectionalText(
  * ("徐汇区附近一家本帮菜小馆"). It can be omitted; the fallback wording still
  * reads cleanly without it.
  */
+/**
+ * Tag-style reason like "#local_food #budget #quick_meal" — emitted by the
+ * planner from `node.tags.slice(0, 3).map(t => "#" + t).join(" ")`. These are
+ * internal metadata tokens; rendering them as the user-facing description for
+ * a directional stop makes the UI look like leaked debug output, so we always
+ * overwrite when sanitizing.
+ */
+function isTagStyleReason(reason: string | undefined | null): boolean {
+  const r = (reason || "").trim();
+  if (!r) return false;
+  // Every whitespace-separated chunk must look like a #tag token (`#` followed
+  // by alphanumeric / underscore / hyphen / CJK ideographs). Single-token
+  // reasons like `#local_food` count too — they're still leaked metadata.
+  const parts = r.split(/\s+/);
+  if (parts.length === 0) return false;
+  const tag = /^#[\w\-一-鿿]+$/u;
+  return parts.every((p) => tag.test(p));
+}
+
 export function sanitizeTimelineItem(
   item: TimelineItem,
   area?: string,
@@ -123,6 +142,12 @@ export function sanitizeTimelineItem(
   if (!isSyntheticConcretePlaceName(item.place_name)) return item;
 
   const { placeName, titleLabel } = buildDirectionalText(area, item.place_name, item.activity_type);
+  // Tag-style reasons (e.g. "#local_food #budget #quick_meal") leak internal
+  // metadata into the UI, so always replace with a user-facing string.
+  const cleanReason =
+    !item.reason || isTagStyleReason(item.reason)
+      ? "演示版未绑定具体店铺，已转为方向建议"
+      : item.reason;
   // Strip every field that could let the UI render a map link.
   return {
     ...item,
@@ -137,7 +162,7 @@ export function sanitizeTimelineItem(
     candidate_score: undefined,
     candidate_reliability: undefined,
     source: "demo",
-    reason: item.reason || "演示版未绑定具体店铺，已转为方向建议",
+    reason: cleanReason,
   };
 }
 
