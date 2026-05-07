@@ -72,6 +72,11 @@ export interface TimelineItem {
   estimated_travel_time_to_next_min: number | null;
   travel_mode?: string;
   is_rush_hour?: boolean;
+  /** Optional GCJ-02 coordinate resolved from Amap; used for nav links. */
+  lng?: number;
+  lat?: number;
+  /** Optional Amap-built navigation URL. */
+  amap_url?: string;
 }
 
 export interface SuitabilityTags {
@@ -146,6 +151,9 @@ export interface PlanResponse {
     places: string;
     travelTimes: string;
     apiReady: string;
+    /** Stable tag for UI: "amap" when Amap routes were used, "demo" otherwise, "mixed" when partial. */
+    routesSource: "amap" | "demo" | "mixed" | "fallback";
+    amapConfigured: boolean;
   };
 }
 

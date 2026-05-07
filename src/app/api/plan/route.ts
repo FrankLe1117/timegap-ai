@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseConstraintsSmart } from "@/lib/llm-parser";
 import { planTimeGapTrip } from "@/lib/planner";
+import { enrichPlanWithAmap } from "@/lib/amap-enrich";
 import { Constraints, Plan } from "@/types";
 
 const FIELD_LABELS: Record<string, string> = {
@@ -56,7 +57,16 @@ export async function POST(request: NextRequest) {
     }
 
     const extraConstraints = currentConstraints || {};
-    const result = planTimeGapTrip(parseResult.constraints, extraConstraints, previousPlans);
+    const baseResult = planTimeGapTrip(parseResult.constraints, extraConstraints, previousPlans);
+
+    // Best-effort Amap enrichment. On any failure or missing key the helper
+    // returns the input unchanged, so the demo path keeps working.
+    let result = baseResult;
+    try {
+      result = await enrichPlanWithAmap(baseResult);
+    } catch (err) {
+      console.warn("[plan] Amap enrichment failed, falling back:", err);
+    }
 
     return NextResponse.json({
       ...result,

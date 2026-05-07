@@ -160,7 +160,7 @@ export default function Home() {
             </div>
             <div>
               <span className="text-sm font-semibold text-slate-900">TimeGap AI</span>
-              <span className="ml-2 text-[11px] text-slate-400">出差/旅行最后一天 · AI 理解 + 演示城市图</span>
+              <span className="ml-2 text-[11px] text-slate-400">出差/旅行最后一天 · AI 理解 + 高德路线（可选） / 演示城市图</span>
               {planData && (
                 <>
                   <span className="ml-3 text-xs text-slate-400">
@@ -197,10 +197,31 @@ export default function Home() {
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
                 晚高峰已纳入
               </span>
-              <span className="flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-                演示城市图
-              </span>
+              {(() => {
+                const rs = planData.dataSources?.routesSource;
+                if (rs === "amap") {
+                  return (
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      高德路线估算
+                    </span>
+                  );
+                }
+                if (rs === "mixed") {
+                  return (
+                    <span className="flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                      高德路线 + 演示图
+                    </span>
+                  );
+                }
+                return (
+                  <span className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                    演示城市图（高德未配置）
+                  </span>
+                );
+              })()}
             </div>
           )}
         </div>

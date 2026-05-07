@@ -2,11 +2,36 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Environment
 
-`PERPLEXITY_API_KEY` (optional): server-side key used to parse natural-language
-constraints with Perplexity inside `/api/plan`. When the key is missing, the
-call times out, or the response is invalid, the app falls back to the built-in
-rule-based parser in `src/lib/constraint-parser.ts`. Copy `.env.example` to
-`.env.local` and fill in the key. The key is only read on the server.
+Both keys below are **optional** and **read only on the server**. They are
+never bundled into the client. Copy `.env.example` to `.env.local` and fill in
+whichever you have.
+
+### `PERPLEXITY_API_KEY` (optional)
+
+Used inside `/api/plan` to parse natural-language constraints with Perplexity.
+When the key is missing, the call times out, or the response is invalid, the
+app falls back to the built-in rule-based parser in
+`src/lib/constraint-parser.ts`.
+
+### `AMAP_API_KEY` (optional)
+
+Server-side Amap (高德) Web Service key. Apply at
+[lbs.amap.com](https://lbs.amap.com/) → 应用管理 → Web 服务 API.
+
+When set, `/api/plan` enriches the planner output with:
+
+- Geocoding for `start_location`, `final_destination`, and each timeline stop.
+- Driving-time route estimates (with the planner's晚高峰 weighting re-applied).
+- Real Amap navigation/POI URLs on every "在高德打开" button.
+
+The integration is best-effort. Each Amap call has a short timeout and any
+failure falls back to the internal demo city graph
+(`src/data/shanghai_city_graph.json`). The UI surfaces the active source via a
+`数据来源` row: 高德路线估算 / 高德路线 + 演示图 / 演示城市图（高德未配置）.
+
+The key is referenced only inside `src/lib/amap-client.ts` and
+`src/lib/amap-enrich.ts`, both of which are imported by server-side route
+handlers only.
 
 ## Getting Started
 

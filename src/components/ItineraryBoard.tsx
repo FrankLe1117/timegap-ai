@@ -10,6 +10,31 @@ interface Props {
   onSelectPlan: (planType: string) => void;
 }
 
+function DataSourceIndicator({ data }: { data: PlanResponse }) {
+  const ds = data.dataSources;
+  if (!ds) return null;
+  const rs = ds.routesSource;
+  let label = "演示城市图 · 规则兜底";
+  let dotClass = "bg-purple-400";
+  if (rs === "amap") {
+    label = "高德路线估算 · 实时 POI/地理编码";
+    dotClass = "bg-emerald-500";
+  } else if (rs === "mixed") {
+    label = "高德路线（部分） + 演示城市图回退";
+    dotClass = "bg-amber-400";
+  } else if (!ds.amapConfigured) {
+    label = "演示城市图（未配置 AMAP_API_KEY）";
+  }
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 px-4 py-2 flex items-center gap-2 text-[11px] text-slate-500">
+      <span className={`w-1.5 h-1.5 rounded-full ${dotClass}`} />
+      <span className="font-medium text-slate-600">数据来源</span>
+      <span>{label}</span>
+      <span className="ml-auto text-slate-400">{ds.travelTimes}</span>
+    </div>
+  );
+}
+
 export default function ItineraryBoard({ data, selectedPlan, onSelectPlan }: Props) {
   if (!data) {
     return (
@@ -32,6 +57,9 @@ export default function ItineraryBoard({ data, selectedPlan, onSelectPlan }: Pro
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {/* Constraint summary + time budget */}
         <ParsedConstraintsCard constraints={data.parsedConstraints} timeBudget={data.timeBudget} />
+
+        {/* Data source indicator */}
+        <DataSourceIndicator data={data} />
 
         {/* Replan changes if any */}
         {data.replanChanges && <ReplanChanges changes={data.replanChanges} />}

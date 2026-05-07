@@ -705,7 +705,9 @@ export function planTimeGapTrip(
     dataSources: {
       places: "演示版上海城市地点库（35+ 内置地点）",
       travelTimes: "演示版交通图，含晚高峰倍率与缓冲时间估算",
-      apiReady: "尚未接入实时地图/点评接口；当前数据为演示版本，仅用于路线模拟",
+      apiReady: "高德路线/POI 在配置 AMAP_API_KEY 后启用；未接入点评/美团",
+      routesSource: "demo",
+      amapConfigured: false,
     },
   };
 }
