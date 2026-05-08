@@ -94,6 +94,12 @@ export default function Home() {
           body: JSON.stringify({
             userInput: effectiveInput || input,
             currentConstraints: extraConstraints,
+            // Carry the previously parsed constraints so the server can sticky
+            // city/start/destination/time when the new turn is a follow-up
+            // refinement (e.g. "避开游客多的地方") that contains no city
+            // signal of its own. Without this the parser would default back to
+            // Shanghai and throw away the Nanjing/Guangzhou/etc. context.
+            previousConstraints: planData?.parsedConstraints,
             previousPlans,
             allowAssumptions: allowAssumptions || false,
           }),
@@ -162,7 +168,7 @@ export default function Home() {
         if (myRequestId === requestIdRef.current) setLoading(false);
       }
     },
-    [previousPlans],
+    [previousPlans, planData?.parsedConstraints],
   );
 
   const handleReset = useCallback(() => {

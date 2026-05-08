@@ -45,11 +45,16 @@ function buildClarificationMessage(missing: string[], assumptions: string[]): st
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { userInput, currentConstraints, previousPlans, allowAssumptions } = body as {
+    const { userInput, currentConstraints, previousPlans, previousConstraints, allowAssumptions } = body as {
       userInput: string;
       currentConstraints?: Partial<Constraints>;
       extraConstraints?: Record<string, unknown>;
       previousPlans?: Plan[];
+      /** Last turn's parsed constraints. Sent by the chat client whenever the
+       *  user is refining an existing plan ("避开游客", "增加一顶吃饭"). The
+       *  server uses it as a sticky prior so refinements that contain no city
+       *  signal don't reset to the Shanghai default. */
+      previousConstraints?: Constraints;
       allowAssumptions?: boolean;
     };
 
@@ -58,6 +63,81 @@ export async function POST(request: NextRequest) {
     }
 
     const parseResult = await parseConstraintsSmart(userInput);
+
+    // Sticky-context fix: when the user is refining an existing plan, fields
+    // that the new turn doesn't actually mention should inherit from the
+    // previous turn. Without this, a follow-up like "避开游客多的地方"
+    // — which carries no city/location/time signal — would re-parse to the
+    // Shanghai default and throw away a Nanjing/Guangzhou itinerary.
+    //
+    // We only inherit fields where the new parse is empty/missing. Anything
+    // the user explicitly mentioned in the new turn (e.g. they typed a new
+    // city) still wins over the previous value.
+    const isReplan = !!previousPlans || !!previousConstraints;
+    if (isReplan && previousConstraints) {
+      const inheritIfEmpty = <K extends keyof Constraints>(k: K) => {
+        const cur = parseResult.constraints[k];
+        if (cur === undefined || cur === null || cur === "") {
+          (parseResult.constraints[k] as unknown) = previousConstraints[k];
+        }
+      };
+      inheritIfEmpty("city");
+      inheritIfEmpty("city_cn");
+      inheritIfEmpty("start_location");
+      inheritIfEmpty("start_time");
+      inheritIfEmpty("final_destination");
+      inheritIfEmpty("departure_time");
+      // Resolved POIs are expensive to recompute; carry them across when
+      // the new turn didn't change start/destination.
+      if (
+        !parseResult.constraints.start_place &&
+        previousConstraints.start_place &&
+        parseResult.constraints.start_location === previousConstraints.start_location
+      ) {
+        parseResult.constraints.start_place = previousConstraints.start_place;
+      }
+      if (
+        !parseResult.constraints.destination_place &&
+        previousConstraints.destination_place &&
+        parseResult.constraints.final_destination === previousConstraints.final_destination
+      ) {
+        parseResult.constraints.destination_place = previousConstraints.destination_place;
+      }
+      // Merge preference/constraint arrays additively so the new turn's
+      // "避开游客" stacks on top of last turn's "本地菜".
+      if (Array.isArray(previousConstraints.preferences) && previousConstraints.preferences.length > 0) {
+        const next = new Set<string>([
+          ...previousConstraints.preferences,
+          ...(parseResult.constraints.preferences || []),
+        ]);
+        parseResult.constraints.preferences = Array.from(next);
+      }
+      if (Array.isArray(previousConstraints.constraints) && previousConstraints.constraints.length > 0) {
+        const next = new Set<string>([
+          ...previousConstraints.constraints,
+          ...(parseResult.constraints.constraints || []),
+        ]);
+        parseResult.constraints.constraints = Array.from(next);
+      }
+      if (Array.isArray(previousConstraints.food_preference) && previousConstraints.food_preference.length > 0) {
+        const next = new Set<string>([
+          ...previousConstraints.food_preference,
+          ...(parseResult.constraints.food_preference || []),
+        ]);
+        parseResult.constraints.food_preference = Array.from(next);
+      }
+      // The follow-up turn rarely re-states luggage/weather/budget; inherit
+      // when current parse left them on their default sentinel values.
+      if (parseResult.constraints.luggage === false && previousConstraints.luggage === true) {
+        parseResult.constraints.luggage = true;
+      }
+      if (parseResult.constraints.weather === "unknown" && previousConstraints.weather && previousConstraints.weather !== "unknown") {
+        parseResult.constraints.weather = previousConstraints.weather;
+      }
+      if (parseResult.constraints.budget_per_person === null && previousConstraints.budget_per_person !== null) {
+        parseResult.constraints.budget_per_person = previousConstraints.budget_per_person;
+      }
+    }
 
     // Amap-driven location resolver. Runs after the rule/LLM parser so it can
     // overwrite weak Shanghai-default guesses with concrete POIs in any Amap-
