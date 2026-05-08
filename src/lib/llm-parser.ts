@@ -178,52 +178,39 @@ function buildResultFromLlm(json: LlmJson, userInput: string): ParseResult {
   };
 }
 
-const PERPLEXITY_URL = "https://api.perplexity.ai/chat/completions";
-const PERPLEXITY_TIMEOUT_MS = 12000;
+// LLM provider config — Zhipu (智谱 GLM) by default.
+// Switching providers later only requires changing these constants and the
+// env var name; the request body is OpenAI-compatible so most Chinese LLM
+// vendors (DeepSeek, Qwen, Moonshot) drop in with no other code changes.
+const LLM_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
+const LLM_MODEL = process.env.ZHIPU_MODEL || "glm-4-flash";
+const LLM_TIMEOUT_MS = 12000;
 
-async function callPerplexity(userInput: string, apiKey: string): Promise<LlmJson | null> {
+async function callLlm(userInput: string, apiKey: string): Promise<LlmJson | null> {
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), PERPLEXITY_TIMEOUT_MS);
+  const t = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
-    const res = await fetch(PERPLEXITY_URL, {
+    const res = await fetch(LLM_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: "sonar",
+        model: LLM_MODEL,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: userInput },
         ],
         temperature: 0.1,
-        response_format: { type: "json_schema", json_schema: { schema: {
-          type: "object",
-          properties: {
-            city: { type: "string" },
-            start_location: { type: "string" },
-            start_time: { type: "string" },
-            final_destination: { type: "string" },
-            departure_time: { type: "string" },
-            preferences: { type: "array", items: { type: "string" } },
-            constraints: { type: "array", items: { type: "string" } },
-            budget_per_person: { type: ["number", "null"] },
-            luggage: { type: "boolean" },
-            weather: { type: "string", enum: ["unknown", "sunny", "rainy"] },
-            walking_preference: { type: "string", enum: ["low", "medium", "high"] },
-            food_preference: { type: "array", items: { type: "string" } },
-            plan_style: { type: "string", enum: ["balanced", "low_risk", "local_experience"] },
-            missing: { type: "array", items: { type: "string" } },
-            confidence: { type: "string", enum: ["high", "medium", "low"] },
-            notes: { type: "string" },
-          },
-        } } },
+        // Zhipu supports OpenAI-style { type: "json_object" } — we already
+        // describe the schema in SYSTEM_PROMPT, so this is enough.
+        response_format: { type: "json_object" },
       }),
       signal: controller.signal,
     });
     if (!res.ok) {
-      console.warn(`[llm-parser] Perplexity returned ${res.status}`);
+      console.warn(`[llm-parser] Zhipu returned ${res.status}`);
       return null;
     }
     const data = await res.json();
@@ -231,7 +218,7 @@ async function callPerplexity(userInput: string, apiKey: string): Promise<LlmJso
     if (!content) return null;
     return tryParseJson(content);
   } catch (err) {
-    console.warn("[llm-parser] Perplexity call failed:", err);
+    console.warn("[llm-parser] Zhipu call failed:", err);
     return null;
   } finally {
     clearTimeout(t);
@@ -239,12 +226,14 @@ async function callPerplexity(userInput: string, apiKey: string): Promise<LlmJso
 }
 
 export async function parseConstraintsSmart(userInput: string): Promise<ParseResult> {
-  const apiKey = process.env.PERPLEXITY_API_KEY;
+  // Prefer Zhipu; fall back to legacy PERPLEXITY_API_KEY name only if someone
+  // already set it (kept for backwards compatibility — safe to remove later).
+  const apiKey = process.env.ZHIPU_API_KEY || process.env.PERPLEXITY_API_KEY;
   if (!apiKey) {
     return parseConstraintsRule(userInput);
   }
 
-  const json = await callPerplexity(userInput, apiKey);
+  const json = await callLlm(userInput, apiKey);
   if (!json) {
     const fb = parseConstraintsRule(userInput);
     return { ...fb, notes: "LLM 解析不可用，已使用规则解析回退。" };
