@@ -11,7 +11,7 @@ import {
   applyResolverToConstraints,
   resolveLocationContext,
 } from "@/lib/amap-resolver";
-import { cityNameForAmap } from "@/lib/city-detect";
+import { cityNameForAmap, hasExplicitCitySignal } from "@/lib/city-detect";
 import {
   resolveDirectionalSuggestions,
   resolveMealReplacement,
@@ -81,28 +81,60 @@ export async function POST(request: NextRequest) {
           (parseResult.constraints[k] as unknown) = previousConstraints[k];
         }
       };
-      inheritIfEmpty("city");
-      inheritIfEmpty("city_cn");
-      inheritIfEmpty("start_location");
+      // City is special: detectCity() falls back to Shanghai whenever the
+      // user's text has zero geographic signal, so the new parse will *always*
+      // come back populated — inheritIfEmpty would never fire. We instead
+      // force-inherit the previous city when the follow-up text contains no
+      // explicit city/anchor mention. This is the actual fix for the
+      // "南京方案 + 追加避开游客 → 跳回上海" bug.
+      const newTurnHasCitySignal = hasExplicitCitySignal(userInput);
+      if (!newTurnHasCitySignal && previousConstraints.city) {
+        // Same root cause as `city`: the rule fallback in llm-parser.ts always
+        // populates start_location / final_destination with the SHANGHAI
+        // profile's defaults (陆家嘴 / 上海虹桥站) whenever the LLM didn't
+        // return one. inheritIfEmpty would therefore never fire on a follow-
+        // up turn. When the new text has no city signal at all, force-inherit
+        // the entire location set from the previous turn.
+        parseResult.constraints.city = previousConstraints.city;
+        if (previousConstraints.city_cn) {
+          parseResult.constraints.city_cn = previousConstraints.city_cn;
+        }
+        if (previousConstraints.start_location) {
+          parseResult.constraints.start_location = previousConstraints.start_location;
+        }
+        if (previousConstraints.final_destination) {
+          parseResult.constraints.final_destination = previousConstraints.final_destination;
+        }
+        if (previousConstraints.start_place) {
+          parseResult.constraints.start_place = previousConstraints.start_place;
+        }
+        if (previousConstraints.destination_place) {
+          parseResult.constraints.destination_place = previousConstraints.destination_place;
+        }
+      } else {
+        inheritIfEmpty("city");
+        inheritIfEmpty("city_cn");
+        inheritIfEmpty("start_location");
+        inheritIfEmpty("final_destination");
+        // Resolved POIs are expensive to recompute; carry them across when
+        // the new turn didn't change start/destination.
+        if (
+          !parseResult.constraints.start_place &&
+          previousConstraints.start_place &&
+          parseResult.constraints.start_location === previousConstraints.start_location
+        ) {
+          parseResult.constraints.start_place = previousConstraints.start_place;
+        }
+        if (
+          !parseResult.constraints.destination_place &&
+          previousConstraints.destination_place &&
+          parseResult.constraints.final_destination === previousConstraints.final_destination
+        ) {
+          parseResult.constraints.destination_place = previousConstraints.destination_place;
+        }
+      }
       inheritIfEmpty("start_time");
-      inheritIfEmpty("final_destination");
       inheritIfEmpty("departure_time");
-      // Resolved POIs are expensive to recompute; carry them across when
-      // the new turn didn't change start/destination.
-      if (
-        !parseResult.constraints.start_place &&
-        previousConstraints.start_place &&
-        parseResult.constraints.start_location === previousConstraints.start_location
-      ) {
-        parseResult.constraints.start_place = previousConstraints.start_place;
-      }
-      if (
-        !parseResult.constraints.destination_place &&
-        previousConstraints.destination_place &&
-        parseResult.constraints.final_destination === previousConstraints.final_destination
-      ) {
-        parseResult.constraints.destination_place = previousConstraints.destination_place;
-      }
       // Merge preference/constraint arrays additively so the new turn's
       // "避开游客" stacks on top of last turn's "本地菜".
       if (Array.isArray(previousConstraints.preferences) && previousConstraints.preferences.length > 0) {

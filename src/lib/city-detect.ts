@@ -292,6 +292,32 @@ export function detectCity(text: string): CityProfile {
 }
 
 /**
+ * Returns true when `text` actually contains a known city alias or anchor —
+ * i.e. the user typed something concrete enough to imply a city. Returns
+ * false for inputs like "避开游客多的地方" that carry no city signal at all.
+ *
+ * detectCity() falls back to Shanghai when nothing matches, so callers can't
+ * tell "the user said Shanghai" from "the user said nothing geographic". This
+ * helper exists so replan handlers can decide whether to inherit the city
+ * from the previous turn instead of letting the Shanghai default win.
+ */
+export function hasExplicitCitySignal(text: string): boolean {
+  if (!text) return false;
+  const t = text.toLowerCase();
+  for (const p of ALL_PROFILES) {
+    for (const a of p.cityAliases) {
+      if (t.includes(a.toLowerCase())) return true;
+    }
+    for (const anchor of p.anchors) {
+      for (const al of anchor.aliases) {
+        if (t.includes(al.toLowerCase())) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Find the first matching anchor in `profile` whose alias appears in `text`,
  * starting after `fromIndex`. Returns null when no match.
  *
