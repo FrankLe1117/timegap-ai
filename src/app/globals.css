@@ -1,8 +1,18 @@
 @import "tailwindcss";
 
+/* Tailwind v4: register a class-based dark variant so we can flip themes via
+   data-theme on <html> without depending on prefers-color-scheme. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;
+}
+
+[data-theme="dark"] {
+  --background: #0b1120;
+  --foreground: #e2e8f0;
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -10,6 +20,10 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+}
+
+html {
+  background: var(--background);
 }
 
 body {
@@ -20,6 +34,7 @@ body {
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -33,4 +48,64 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Smooth theme transition \u2014 long enough to feel intentional, short enough
+   to stay snappy. Excludes transform so animations don't get dragged. */
+html, body, [class*="bg-"], [class*="text-"], [class*="border-"] {
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease;
+}
+
+/* Subtle fade-in for plan cards / clarification \u2014 makes the demo feel
+   intentional instead of "blink in". */
+@keyframes laststop-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: laststop-fade-in 280ms ease-out both;
+}
+
+@keyframes laststop-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.10) 0%,
+    rgba(148, 163, 184, 0.25) 50%,
+    rgba(148, 163, 184, 0.10) 100%
+  );
+  background-size: 200% 100%;
+  animation: laststop-shimmer 1.6s ease-in-out infinite;
+}
+
+[data-theme="dark"] .shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(71, 85, 105, 0.20) 0%,
+    rgba(71, 85, 105, 0.40) 50%,
+    rgba(71, 85, 105, 0.20) 100%
+  );
+  background-size: 200% 100%;
+}
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

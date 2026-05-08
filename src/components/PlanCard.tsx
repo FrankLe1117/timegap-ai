@@ -17,27 +17,27 @@ const planMeta: Record<string, {
   balanced: {
     label: "均衡本地路线",
     bestFor: "适合大多数最后一天",
-    accentBg: "bg-blue-50",
-    accentBorder: "border-blue-200",
-    accentText: "text-blue-700",
+    accentBg: "bg-blue-50 dark:bg-blue-950/40",
+    accentBorder: "border-blue-200 dark:border-blue-900/70",
+    accentText: "text-blue-700 dark:text-blue-300",
     dotColor: "bg-blue-500",
     icon: "🧭",
   },
   low_risk: {
     label: "稳妥赶车路线",
     bestFor: "带行李或时间紧",
-    accentBg: "bg-emerald-50",
-    accentBorder: "border-emerald-200",
-    accentText: "text-emerald-700",
+    accentBg: "bg-emerald-50 dark:bg-emerald-950/40",
+    accentBorder: "border-emerald-200 dark:border-emerald-900/70",
+    accentText: "text-emerald-700 dark:text-emerald-300",
     dotColor: "bg-emerald-500",
     icon: "🛡️",
   },
   local_experience: {
     label: "深度本地体验",
     bestFor: "想感受城市气息",
-    accentBg: "bg-purple-50",
-    accentBorder: "border-purple-200",
-    accentText: "text-purple-700",
+    accentBg: "bg-purple-50 dark:bg-purple-950/40",
+    accentBorder: "border-purple-200 dark:border-purple-900/70",
+    accentText: "text-purple-700 dark:text-purple-300",
     dotColor: "bg-purple-500",
     icon: "🏙️",
   },
@@ -45,15 +45,15 @@ const planMeta: Record<string, {
 
 function MiniBar({ value, label, kind }: { value: number; label: string; kind: "safety" | "experience" }) {
   const safetyColor = value >= 85 ? "bg-emerald-500" : value >= 65 ? "bg-amber-500" : "bg-red-500";
-  const safetyText = value >= 85 ? "text-emerald-600" : value >= 65 ? "text-amber-600" : "text-red-600";
+  const safetyText = value >= 85 ? "text-emerald-600 dark:text-emerald-400" : value >= 65 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400";
   const expColor = value >= 75 ? "bg-purple-500" : value >= 55 ? "bg-blue-500" : "bg-slate-400";
-  const expText = value >= 75 ? "text-purple-600" : value >= 55 ? "text-blue-600" : "text-slate-500";
+  const expText = value >= 75 ? "text-purple-600 dark:text-purple-400" : value >= 55 ? "text-blue-600 dark:text-blue-400" : "text-slate-500 dark:text-slate-400";
   const color = kind === "safety" ? safetyColor : expColor;
   const textColor = kind === "safety" ? safetyText : expText;
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-[11px] text-slate-400">{label}</span>
-      <div className="w-12 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+      <span className="text-[11px] text-slate-400 dark:text-slate-500">{label}</span>
+      <div className="w-12 h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${value}%` }} />
       </div>
       <span className={`text-[11px] font-mono font-semibold ${textColor}`}>{value}</span>
@@ -63,8 +63,8 @@ function MiniBar({ value, label, kind }: { value: number; label: string; kind: "
 
 function Badge({ label, value, good }: { label: string; value: string; good: boolean }) {
   const color = good
-    ? "text-emerald-700 bg-emerald-50 border-emerald-100"
-    : "text-amber-700 bg-amber-50 border-amber-100";
+    ? "text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-100 dark:border-emerald-900/60"
+    : "text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border-amber-100 dark:border-amber-900/60";
   return (
     <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[11px] border ${color}`}>
       {label} {value}
@@ -94,14 +94,14 @@ function RouteChainView({ chain, dotColor, compact }: { chain: RouteHop[]; dotCo
       {seq.map((node, idx) => (
         <span key={idx} className="inline-flex items-center">
           {node.legBefore && (
-            <span className="inline-flex items-center text-slate-400 mx-1">
-              <span className={`mr-0.5 ${node.legBefore.is_rush_hour ? "text-amber-500" : ""}`}>
+            <span className="inline-flex items-center text-slate-400 dark:text-slate-500 mx-1">
+              <span className={`mr-0.5 ${node.legBefore.is_rush_hour ? "text-amber-500 dark:text-amber-400" : ""}`}>
                 ─{node.legBefore.travel_min}m{node.legBefore.is_rush_hour ? "⚠" : ""}─
               </span>
               <span>›</span>
             </span>
           )}
-          <span className="inline-flex items-center text-slate-700">
+          <span className="inline-flex items-center text-slate-700 dark:text-slate-200">
             <span className={`w-1.5 h-1.5 rounded-full ${dotColor} mr-1`} />
             <span className="font-medium">{node.name}</span>
           </span>
@@ -147,24 +147,24 @@ export default function PlanCard({ plan, selected, onSelect }: PlanCardProps) {
     <div
       className={`rounded-xl border transition-all cursor-pointer ${
         selected
-          ? `${meta.accentBorder} shadow-md ring-1 ring-slate-200/50`
-          : "border-slate-200 hover:border-slate-300 hover:shadow-sm"
+          ? `${meta.accentBorder} shadow-md ring-1 ring-slate-200/50 dark:ring-slate-700/50`
+          : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-sm"
       }`}
       onClick={onSelect}
     >
       {/* exportRoot wraps everything we want in the snapshot. */}
-      <div ref={exportRootRef} className="bg-white rounded-xl">
+      <div ref={exportRootRef} className="bg-white dark:bg-slate-900 rounded-xl">
         {/* Compact card — always visible */}
         <div className="px-4 py-3">
           <div className="flex items-start justify-between mb-2">
             <div className="flex items-center gap-2">
               <span className="text-sm">{meta.icon}</span>
               <div>
-                <span className="text-sm font-semibold text-slate-900">{meta.label}</span>
-                <span className="ml-2 text-[11px] text-slate-400">{meta.bestFor}</span>
+                <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{meta.label}</span>
+                <span className="ml-2 text-[11px] text-slate-400 dark:text-slate-500">{meta.bestFor}</span>
               </div>
             </div>
-            <div className="flex items-center gap-1 text-[11px] text-slate-500" data-export-ignore="true">
+            <div className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400" data-export-ignore="true">
               <span>{stopCount}站</span>
               <svg
                 className={`w-3.5 h-3.5 transition-transform ${selected ? "rotate-180" : ""}`}
@@ -198,52 +198,52 @@ export default function PlanCard({ plan, selected, onSelect }: PlanCardProps) {
           </div>
 
           {!selected && (
-            <div className="mt-2 pt-2 border-t border-slate-50 flex items-center justify-between" data-export-ignore="true">
-              <p className="text-[11px] text-slate-500">最晚出发去车站 <span className="font-mono text-red-600 font-semibold">{plan.latest_leave_for_station}</span></p>
-              <p className="text-[11px] text-blue-600 font-medium">查看详情 →</p>
+            <div className="mt-2 pt-2 border-t border-slate-50 dark:border-slate-800 flex items-center justify-between" data-export-ignore="true">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">最晚出发去车站 <span className="font-mono text-red-600 dark:text-red-400 font-semibold">{plan.latest_leave_for_station}</span></p>
+              <p className="text-[11px] text-blue-600 dark:text-blue-400 font-medium">查看详情 →</p>
             </div>
           )}
         </div>
 
         {/* Expanded detail — only when selected */}
         {selected && (
-          <div className="border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
+          <div className="border-t border-slate-100 dark:border-slate-800" onClick={(e) => e.stopPropagation()}>
             {/* Time window line — useful for export readers */}
-            <div className="px-4 py-2 border-b border-slate-100 text-[11px] text-slate-500 flex items-center gap-3">
+            <div className="px-4 py-2 border-b border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-3">
               <span>
-                时间窗 <span className="font-mono text-slate-700">
+                时间窗 <span className="font-mono text-slate-700 dark:text-slate-200">
                   {plan.timeline[0]?.start_time}–{plan.timeline[plan.timeline.length - 1]?.end_time}
                 </span>
               </span>
               <span>
-                最晚出发 <span className="font-mono text-red-600 font-semibold">{plan.latest_leave_for_station}</span>
+                最晚出发 <span className="font-mono text-red-600 dark:text-red-400 font-semibold">{plan.latest_leave_for_station}</span>
               </span>
             </div>
 
             {/* Trade-off + explanation */}
-            <div className="px-4 py-3 bg-slate-50/50 space-y-2">
+            <div className="px-4 py-3 bg-slate-50/50 dark:bg-slate-800/40 space-y-2">
               <div>
-                <p className="text-[11px] font-medium text-slate-500 mb-1">取舍说明</p>
+                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">取舍说明</p>
                 <p className={`text-xs font-medium ${meta.accentText}`}>{plan.tradeoff_summary}</p>
               </div>
               <div>
-                <p className="text-[11px] font-medium text-slate-500 mb-1">为什么这样安排</p>
-                <p className="text-xs text-slate-600 leading-relaxed">{plan.explanation}</p>
+                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1">为什么这样安排</p>
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">{plan.explanation}</p>
               </div>
             </div>
 
             {/* Route chain visualization */}
             {plan.route_chain && plan.route_chain.length > 0 && (
-              <div className="px-4 py-3 border-t border-slate-100">
-                <p className="text-[11px] font-medium text-slate-500 mb-2">空间-时间链路</p>
+              <div className="px-4 py-3 border-t border-slate-100 dark:border-slate-800">
+                <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-2">空间-时间链路</p>
                 <RouteChainView chain={plan.route_chain} dotColor={meta.dotColor} />
-                <p className="text-[10px] text-slate-400 mt-1">数字 = 段间分钟数，⚠ = 处于晚高峰</p>
+                <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">数字 = 段间分钟数，⚠ = 处于晚高峰</p>
               </div>
             )}
 
             {/* Rush hour warning */}
             {plan.rush_hour_warning && (
-              <div className="px-4 py-2 bg-amber-50 border-y border-amber-100 text-xs text-amber-700 flex items-center gap-1.5">
+              <div className="px-4 py-2 bg-amber-50 dark:bg-amber-950/40 border-y border-amber-100 dark:border-amber-900/60 text-xs text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
                 <span>⚠️</span>
                 {plan.rush_hour_warning}
               </div>
@@ -251,7 +251,7 @@ export default function PlanCard({ plan, selected, onSelect }: PlanCardProps) {
 
             {/* Timeline */}
             <div className="px-4 py-3">
-              <p className="text-[11px] font-medium text-slate-500 mb-2">时间线</p>
+              <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-2">时间线</p>
               <div className="space-y-0">
                 {plan.timeline.map((item, i) => (
                   <TimelineItem
@@ -264,16 +264,16 @@ export default function PlanCard({ plan, selected, onSelect }: PlanCardProps) {
             </div>
 
             {/* Footer: risk + departure */}
-            <div className="px-4 py-3 bg-slate-50/50 border-t border-slate-100 space-y-1.5">
+            <div className="px-4 py-3 bg-slate-50/50 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500">建议最晚出发去车站</span>
-                <span className="font-semibold text-red-600">{plan.latest_leave_for_station}</span>
+                <span className="text-slate-500 dark:text-slate-400">建议最晚出发去车站</span>
+                <span className="font-semibold text-red-600 dark:text-red-400">{plan.latest_leave_for_station}</span>
               </div>
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+              <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
                 <span>📌</span>
                 <span>{plan.risk_note}</span>
               </div>
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
+              <div className="flex items-center gap-1.5 text-[11px] text-slate-400 dark:text-slate-500">
                 <span>💡</span>
                 <span>{plan.backup_suggestion}</span>
               </div>
@@ -281,7 +281,7 @@ export default function PlanCard({ plan, selected, onSelect }: PlanCardProps) {
 
             {/* Export-only notice. Visible in the saved PNG so the reader
                 knows the embedded Amap links cannot be tapped. */}
-            <div className="px-4 py-2 bg-amber-50/70 border-t border-amber-100 text-[11px] text-amber-700 flex items-start gap-1.5">
+            <div className="px-4 py-2 bg-amber-50/70 dark:bg-amber-950/30 border-t border-amber-100 dark:border-amber-900/60 text-[11px] text-amber-700 dark:text-amber-300 flex items-start gap-1.5">
               <span>📷</span>
               <span>
                 图片中的地图/高德链接无法点击，请回到 Last Stop 尾程 应用内打开路线。
@@ -296,10 +296,10 @@ export default function PlanCard({ plan, selected, onSelect }: PlanCardProps) {
           render in the saved PNG. */}
       {selected && (
         <div
-          className="border-t border-slate-100 px-4 py-2.5 flex items-center justify-between gap-3 bg-white rounded-b-xl"
+          className="border-t border-slate-100 dark:border-slate-800 px-4 py-2.5 flex items-center justify-between gap-3 bg-white dark:bg-slate-900 rounded-b-xl"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="text-[11px] text-slate-500 flex items-center gap-1.5 leading-snug">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 leading-snug">
             <span>💡</span>
             <span>保存为图片后，地图链接不可点击。如需打开路线，请回到应用内。</span>
           </div>
@@ -307,7 +307,7 @@ export default function PlanCard({ plan, selected, onSelect }: PlanCardProps) {
             {exportMsg && (
               <span
                 className={`text-[11px] ${
-                  exportMsg.kind === "ok" ? "text-emerald-600" : "text-red-600"
+                  exportMsg.kind === "ok" ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"
                 }`}
               >
                 {exportMsg.text}
@@ -318,7 +318,7 @@ export default function PlanCard({ plan, selected, onSelect }: PlanCardProps) {
               onClick={handleExport}
               disabled={exporting}
               title="将该方案保存为本地 PNG 图片（链接不可点击）"
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 text-xs font-medium text-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:text-blue-700 dark:hover:text-blue-300 text-xs font-medium text-slate-700 dark:text-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />

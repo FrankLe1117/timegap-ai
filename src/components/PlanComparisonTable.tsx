@@ -6,10 +6,10 @@ function MiniBar({ value, kind }: { value: number; kind: "safety" | "experience"
   const color = kind === "safety" ? safetyColor : expColor;
   return (
     <div className="flex items-center gap-1.5">
-      <div className="w-10 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+      <div className="w-10 h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${value}%` }} />
       </div>
-      <span className="text-[11px] font-mono text-slate-600">{value}</span>
+      <span className="text-[11px] font-mono text-slate-600 dark:text-slate-300">{value}</span>
     </div>
   );
 }
@@ -35,17 +35,17 @@ const planLabels: Record<string, string> = {
 
 export default function PlanComparisonTable({ plans }: { plans: Plan[] }) {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-      <div className="px-3 py-2 border-b border-slate-100">
-        <span className="text-[11px] font-medium text-slate-500">方案对比</span>
+    <div className="bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+      <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800">
+        <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">方案对比</span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-[11px]">
           <thead>
-            <tr className="border-b border-slate-50">
-              <th className="text-left px-3 py-2 text-slate-400 font-normal" />
+            <tr className="border-b border-slate-50 dark:border-slate-800">
+              <th className="text-left px-3 py-2 text-slate-400 dark:text-slate-500 font-normal" />
               {plans.map((p) => (
-                <th key={p.plan_type} className="text-center px-3 py-2 font-medium text-slate-600">
+                <th key={p.plan_type} className="text-center px-3 py-2 font-medium text-slate-600 dark:text-slate-300">
                   {planLabels[p.plan_type] || p.plan_name}
                 </th>
               ))}
@@ -53,8 +53,8 @@ export default function PlanComparisonTable({ plans }: { plans: Plan[] }) {
           </thead>
           <tbody>
             {Object.values(labels).map(({ key, label, invert }) => (
-              <tr key={key} className="border-b border-slate-50">
-                <td className="px-3 py-1.5 text-slate-500">{label}</td>
+              <tr key={key} className="border-b border-slate-50 dark:border-slate-800">
+                <td className="px-3 py-1.5 text-slate-500 dark:text-slate-400">{label}</td>
                 {plans.map((p) => {
                   const rawVal = p.suitability_tags[key as keyof typeof p.suitability_tags];
                   const val = typeof rawVal === "string" ? rawVal : String(rawVal);
@@ -64,7 +64,7 @@ export default function PlanComparisonTable({ plans }: { plans: Plan[] }) {
                     <td key={p.plan_type} className="text-center px-3 py-1.5">
                       <span className="inline-flex items-center gap-1">
                         <Dot good={good} />
-                        <span className="text-slate-600">{displayVal}</span>
+                        <span className="text-slate-600 dark:text-slate-300">{displayVal}</span>
                       </span>
                     </td>
                   );
@@ -72,7 +72,7 @@ export default function PlanComparisonTable({ plans }: { plans: Plan[] }) {
               </tr>
             ))}
             <tr>
-              <td className="px-3 py-1.5 text-slate-500 font-medium">到站安全</td>
+              <td className="px-3 py-1.5 text-slate-500 dark:text-slate-400 font-medium">到站安全</td>
               {plans.map((p) => (
                 <td key={p.plan_type} className="px-3 py-1.5">
                   <MiniBar value={p.suitability_tags.station_arrival_confidence} kind="safety" />
@@ -80,7 +80,7 @@ export default function PlanComparisonTable({ plans }: { plans: Plan[] }) {
               ))}
             </tr>
             <tr>
-              <td className="px-3 py-1.5 text-slate-500 font-medium">体验分</td>
+              <td className="px-3 py-1.5 text-slate-500 dark:text-slate-400 font-medium">体验分</td>
               {plans.map((p) => (
                 <td key={p.plan_type} className="px-3 py-1.5">
                   <MiniBar value={p.suitability_tags.experience_score} kind="experience" />

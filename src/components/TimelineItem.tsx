@@ -1,15 +1,15 @@
 import { TimelineItem as TimelineItemType } from "@/types";
 
 const activityColors: Record<string, string> = {
-  transport: "border-slate-300 bg-slate-50",
-  lunch: "border-orange-300 bg-orange-50",
-  dinner: "border-rose-300 bg-rose-50",
-  city_walk: "border-green-300 bg-green-50",
-  coffee: "border-amber-300 bg-amber-50",
-  attraction: "border-blue-300 bg-blue-50",
-  station_buffer: "border-purple-300 bg-purple-50",
-  shopping: "border-pink-300 bg-pink-50",
-  rest: "border-teal-300 bg-teal-50",
+  transport: "border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60",
+  lunch: "border-orange-300 dark:border-orange-900/70 bg-orange-50 dark:bg-orange-950/30",
+  dinner: "border-rose-300 dark:border-rose-900/70 bg-rose-50 dark:bg-rose-950/30",
+  city_walk: "border-green-300 dark:border-green-900/70 bg-green-50 dark:bg-green-950/30",
+  coffee: "border-amber-300 dark:border-amber-900/70 bg-amber-50 dark:bg-amber-950/30",
+  attraction: "border-blue-300 dark:border-blue-900/70 bg-blue-50 dark:bg-blue-950/30",
+  station_buffer: "border-purple-300 dark:border-purple-900/70 bg-purple-50 dark:bg-purple-950/30",
+  shopping: "border-pink-300 dark:border-pink-900/70 bg-pink-50 dark:bg-pink-950/30",
+  rest: "border-teal-300 dark:border-teal-900/70 bg-teal-50 dark:bg-teal-950/30",
 };
 
 const activityLabels: Record<string, string> = {
@@ -67,36 +67,36 @@ const hasSearchAffordance = (item: TimelineItemType): boolean => {
 const isTransportLeg = (item: TimelineItemType): boolean => item.activity_type === "transport";
 
 const routeChipClasses: Record<string, string> = {
-  transit: "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100",
-  driving: "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100",
-  walking: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
-  search: "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+  transit: "border-sky-200 dark:border-sky-900/60 bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-950/60",
+  driving: "border-indigo-200 dark:border-indigo-900/60 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-950/60",
+  walking: "border-emerald-200 dark:border-emerald-900/60 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/60",
+  search: "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700",
 };
 
 export default function TimelineItem({ item, isLast }: { item: TimelineItemType; isLast: boolean }) {
   return (
     <div className="flex gap-3">
       <div className="flex flex-col items-center">
-        <div className="w-3 h-3 rounded-full bg-blue-500 border-2 border-blue-200 shrink-0 mt-1" />
-        {!isLast && <div className="w-0.5 flex-1 bg-slate-200 min-h-[20px]" />}
+        <div className="w-3 h-3 rounded-full bg-blue-500 border-2 border-blue-200 dark:border-blue-900/70 shrink-0 mt-1" />
+        {!isLast && <div className="w-0.5 flex-1 bg-slate-200 dark:bg-slate-700 min-h-[20px]" />}
       </div>
 
       <div className={`flex-1 pb-4 pl-1 ${isLast ? "pb-0" : ""}`}>
         <div className="flex items-baseline gap-2 mb-0.5">
-          <span className="text-xs font-mono text-slate-500">
+          <span className="text-xs font-mono text-slate-500 dark:text-slate-400">
             {item.start_time} - {item.end_time}
           </span>
-          <span className="text-[11px] text-slate-400">{activityLabels[item.activity_type] || ""}</span>
+          <span className="text-[11px] text-slate-400 dark:text-slate-500">{activityLabels[item.activity_type] || ""}</span>
         </div>
-        <div className={`px-3 py-2 rounded-lg border ${activityColors[item.activity_type] || "border-slate-200 bg-white"}`}>
+        <div className={`px-3 py-2 rounded-lg border ${activityColors[item.activity_type] || "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"}`}>
           <div className="flex items-center gap-1.5">
-            <p className="text-sm font-medium text-slate-800">{item.title}</p>
+            <p className="text-sm font-medium text-slate-800 dark:text-slate-100">{item.title}</p>
             {item.source && item.source !== "demo" && item.candidate_reliability !== "suggested" && (
               <span
                 className={
                   item.candidate_reliability === "confirmed"
-                    ? "text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 border border-emerald-200"
-                    : "text-[10px] px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200"
+                    ? "text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/60"
+                    : "text-[10px] px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-900/60"
                 }
                 title={
                   item.candidate_reliability === "confirmed"
@@ -115,7 +115,7 @@ export default function TimelineItem({ item, isLast }: { item: TimelineItemType;
             )}
           </div>
           {item.reason && (
-            <p className="text-xs text-slate-500 mt-0.5">{item.reason}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{item.reason}</p>
           )}
           {hasNavablePlace(item) && (
             <button
@@ -128,7 +128,7 @@ export default function TimelineItem({ item, isLast }: { item: TimelineItemType;
                     : `https://uri.amap.com/search?keyword=${encodeURIComponent(item.place_name)}&city=${encodeURIComponent("上海")}&src=${encodeURIComponent("Last Stop 尾程")}`);
                 window.open(url, "_blank");
               }}
-              className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-blue-600 hover:text-blue-800 transition-colors"
+              className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors"
             >
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
@@ -149,14 +149,14 @@ export default function TimelineItem({ item, isLast }: { item: TimelineItemType;
                     ? `在高德搜索“${item.search_query}”，从结果中手动选择一家`
                     : "在高德搜索，手动选择一家"
                 }
-                className="inline-flex items-center gap-1 text-[11px] text-amber-700 hover:text-amber-900 transition-colors"
+                className="inline-flex items-center gap-1 text-[11px] text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-200 transition-colors"
               >
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
                 </svg>
                 {item.activity_type === "coffee" ? "在高德搜索咖啡馆" : "在高德搜索餐馆"}
               </button>
-              <p className="text-[10px] text-slate-400">
+              <p className="text-[10px] text-slate-400 dark:text-slate-500">
                 方向建议，未绑定具体地点{item.search_query ? `（关键字：${item.search_query}）` : ""}
               </p>
             </div>
@@ -165,7 +165,7 @@ export default function TimelineItem({ item, isLast }: { item: TimelineItemType;
             && !hasSearchAffordance(item)
             && !["transport", "station_buffer"].includes(item.activity_type)
             && (item.place_kind === "directional" || isUnverifiedSyntheticName(item)) && (
-              <p className="mt-1.5 text-[11px] text-slate-400">
+              <p className="mt-1.5 text-[11px] text-slate-400 dark:text-slate-500">
                 方向建议，未绑定具体地点
               </p>
             )}

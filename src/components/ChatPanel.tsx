@@ -50,10 +50,33 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
   const [input, setInput] = useState("");
   const [showExamples, setShowExamples] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Keyboard shortcuts:
+  //  - Cmd/Ctrl+K  → focus the chat composer (works from anywhere on the page)
+  //  - Cmd/Ctrl+/  → same (vim-style)
+  //  - Esc        → if textarea is focused, blur it; clarification banner has its own Esc.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && (e.key === "k" || e.key === "K" || e.key === "/")) {
+        e.preventDefault();
+        textareaRef.current?.focus();
+        return;
+      }
+      if (e.key === "Escape") {
+        if (document.activeElement === textareaRef.current) {
+          textareaRef.current?.blur();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const handleSubmit = (text?: string) => {
     const value = text || input;
@@ -68,18 +91,18 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
   };
 
   return (
-    <div className="flex flex-col h-full bg-white rounded-2xl shadow-sm border border-slate-200">
+    <div className="flex flex-col h-full bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-slate-100">
+      <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-sm">
             <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
           <div>
-            <h1 className="text-base font-semibold text-slate-900">Last Stop 尾程</h1>
-            <p className="text-[11px] text-slate-400">离城前的最后几小时，安排得刚刚好。</p>
+            <h1 className="text-base font-semibold text-slate-900 dark:text-slate-100">Last Stop 尾程</h1>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500">离城前的最后几小时，安排得刚刚好。</p>
           </div>
         </div>
       </div>
@@ -87,22 +110,22 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4 min-h-0">
         {messages.length === 0 && (
-          <div className="text-center py-6 text-slate-500">
+          <div className="text-center py-6 text-slate-500 dark:text-slate-400">
             <svg className="w-10 h-10 mx-auto mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
             </svg>
-            <p className="text-sm text-slate-600">告诉我你的起点、出发车次／航班和偏好</p>
-            <p className="text-[11px] mt-1 text-slate-400">支持国内多数城市，在「赶车安全边界」内给你最优体验</p>
+            <p className="text-sm text-slate-600 dark:text-slate-300">告诉我你的起点、出发车次／航班和偏好</p>
+            <p className="text-[11px] mt-1 text-slate-400 dark:text-slate-500">支持国内多数城市，在「赶车安全边界」内给你最优体验</p>
           </div>
         )}
 
         {messages.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+          <div key={i} className={`flex animate-fade-in ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
             <div
               className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
                 msg.role === "user"
                   ? "bg-blue-600 text-white rounded-br-md"
-                  : "bg-slate-100 text-slate-700 rounded-bl-md"
+                  : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200 rounded-bl-md"
               }`}
             >
               {msg.content}
@@ -111,12 +134,12 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
         ))}
 
         {loading && (
-          <div className="flex justify-start">
-            <div className="bg-slate-100 px-4 py-3 rounded-2xl rounded-bl-md">
+          <div className="flex justify-start animate-fade-in">
+            <div className="bg-slate-100 dark:bg-slate-800 px-4 py-3 rounded-2xl rounded-bl-md">
               <div className="flex gap-1.5">
-                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" />
+                <div className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                <div className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                <div className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" />
               </div>
             </div>
           </div>
@@ -139,7 +162,7 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
 
       {/* Clarification prompt — shown when parser confidence is low */}
       {clarification && (
-        <div className="mx-6 mb-3 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2.5 text-xs text-amber-800">
+        <div className="mx-6 mb-3 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/70 dark:bg-amber-900/15 px-3 py-2.5 text-xs text-amber-800 dark:text-amber-200 animate-fade-in">
           <p className="font-medium mb-1.5">需要确认这些信息：</p>
           <ul className="list-disc list-inside space-y-0.5 mb-2">
             {clarification.missing.map((m) => (
@@ -147,7 +170,7 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
             ))}
           </ul>
           {clarification.assumptions.length > 0 && (
-            <p className="text-[11px] text-amber-700/80 mb-2">
+            <p className="text-[11px] text-amber-700/80 dark:text-amber-300/80 mb-2">
               如果不补充，将使用默认：{clarification.assumptions.join("；")}。
             </p>
           )}
@@ -158,7 +181,7 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
           >
             就按默认规划
           </button>
-          <span className="ml-2 text-[11px] text-amber-700/80">或在下方补充信息</span>
+          <span className="ml-2 text-[11px] text-amber-700/80 dark:text-amber-300/80">或在下方补充信息</span>
         </div>
       )}
 
@@ -171,7 +194,7 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
                 key={i}
                 onClick={() => handleQuickAction(action)}
                 disabled={loading}
-                className="text-xs px-3 py-1.5 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-full transition-colors text-slate-600 hover:text-blue-700 disabled:opacity-50"
+                className="text-xs px-3 py-1.5 bg-slate-50 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-blue-900/30 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 rounded-full transition-colors text-slate-600 dark:text-slate-300 hover:text-blue-700 dark:hover:text-blue-300 disabled:opacity-50"
               >
                 {action.label}
               </button>
@@ -183,10 +206,11 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
       {/* Input — prominent composer */}
       <div className="px-6 pb-4 pt-3">
         {messages.length === 0 && (
-          <p className="text-[11px] text-slate-500 mb-1.5">或者直接用一句话描述：</p>
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-1.5">或者直接用一句话描述：</p>
         )}
-        <div className="relative rounded-2xl border-2 border-slate-200 bg-white shadow-sm focus-within:border-blue-500 focus-within:shadow-md transition-all">
+        <div className="relative rounded-2xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950/40 shadow-sm focus-within:border-blue-500 dark:focus-within:border-blue-500 focus-within:shadow-md transition-all">
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -201,13 +225,13 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
                 : "继续补充：再加一个咖啡馆 / 想换个本地小馆 / 改成更安全……"
             }
             rows={messages.length === 0 ? 3 : 2}
-            className="w-full px-4 pt-3 pb-10 bg-transparent rounded-2xl text-sm leading-relaxed resize-none focus:outline-none placeholder:text-slate-400"
+            className="w-full px-4 pt-3 pb-10 bg-transparent rounded-2xl text-sm leading-relaxed resize-none focus:outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500 text-slate-900 dark:text-slate-100"
             disabled={loading}
           />
           <button
             onClick={() => handleSubmit()}
             disabled={loading || !input.trim()}
-            className="absolute right-2 bottom-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 text-xs font-medium"
+            className="absolute right-2 bottom-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 text-xs font-medium shadow-sm"
             aria-label="生成方案"
           >
             <span>生成</span>
@@ -220,7 +244,7 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
         {/* Example chips — secondary, compact */}
         {showExamples && messages.length === 0 && (
           <div className="mt-3">
-            <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1.5">快速示例</p>
+            <p className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500 mb-1.5">快速示例</p>
             <div className="flex flex-wrap gap-1.5">
               {EXAMPLE_PROMPTS.map((ex, i) => (
                 <button
@@ -229,7 +253,7 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
                     setInput(ex);
                   }}
                   title={ex}
-                  className="text-[11px] px-2.5 py-1 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-full transition-colors text-slate-500 hover:text-blue-700 max-w-full truncate"
+                  className="text-[11px] px-2.5 py-1 bg-slate-50 dark:bg-slate-800 hover:bg-blue-50 dark:hover:bg-blue-900/30 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 rounded-full transition-colors text-slate-500 dark:text-slate-400 hover:text-blue-700 dark:hover:text-blue-300 max-w-full truncate"
                 >
                   {ex.length > 26 ? ex.slice(0, 26) + "…" : ex}
                 </button>
