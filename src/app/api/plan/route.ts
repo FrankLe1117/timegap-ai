@@ -3,6 +3,7 @@ import { parseConstraintsSmart } from "@/lib/llm-parser";
 import { planTimeGapTrip } from "@/lib/planner";
 import { enrichPlanWithAmap } from "@/lib/amap-enrich";
 import { buildCandidatePool, isPoolUsable } from "@/lib/candidate-pool";
+import { curatePoolWithLlm } from "@/lib/llm-curator";
 import { applyCandidatesToPlans } from "@/lib/planner-replace";
 import { geocodePlace, isAmapConfigured } from "@/lib/amap-client";
 import { sanitizePlanResponse } from "@/lib/place-sanitize";
@@ -140,10 +141,16 @@ export async function POST(request: NextRequest) {
           cachedDest ?? geocodePlace(parseResult.constraints.final_destination, cityForLookup),
         ]);
         startCoord = startPoi?.coord ?? null;
-        const pool = await buildCandidatePool(parseResult.constraints, {
+        const rawPool = await buildCandidatePool(parseResult.constraints, {
           startCoord: startPoi?.coord ?? null,
           destCoord: destPoi?.coord ?? null,
         });
+        // LLM curator: bumps locally-relevant picks to the front and attaches
+        // one-line `local_reason` per pick. Falls back to rawPool when the LLM
+        // is unavailable, returns nothing useful, or the candidate whitelist
+        // rejects every pick. Never blocks the main path — worst case the user
+        // sees the original Amap ordering.
+        const pool = await curatePoolWithLlm(rawPool, parseResult.constraints);
         if (isPoolUsable(pool)) {
           const replaced = await applyCandidatesToPlans(result, pool, {
             startCoord: startPoi?.coord ?? null,

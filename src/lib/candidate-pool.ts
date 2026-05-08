@@ -76,6 +76,16 @@ export interface Candidate {
   confidence: number;
   /** True when this candidate is allowed to actually replace a demo stop. */
   allow_in_itinerary: boolean;
+  /**
+   * LLM-generated one-line local-flavor reason. Set by the curator step when
+   * Zhipu/GLM picked this candidate from the whitelist. Never trusted as a
+   * source-of-truth field — the candidate's `name`, `coord`, `poi_id` etc.
+   * still come from Amap. Absent when LLM is disabled or skipped this card.
+   */
+  local_reason?: string;
+  /** True when the LLM explicitly preferred this candidate over the others in
+   *  its category. Used to bump it to rank-1 inside the planner. */
+  llm_picked?: boolean;
 }
 
 export interface CandidatePool {

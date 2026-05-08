@@ -522,6 +522,10 @@ async function applyToPlan(
       reason: pick.district
         ? `${pick.district}・${primary === "station_friendly" ? "靠近车站候选" : "高德候选点"}`
         : `高德候选点（${primary}）`,
+      // LLM curator's local-flavor blurb. Only set when the curator hit the
+      // whitelist for this poi_id; absent when the LLM was disabled or this
+      // candidate wasn't picked.
+      local_reason: pick.local_reason,
     };
     marks.push({ index: i, candidate: pick });
     replacedCount += 1;

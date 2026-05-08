@@ -160,6 +160,15 @@ export interface TimelineItem {
   /** Human-readable summary of what `search_url` will search for, e.g.
    *  "人民广场 本帮菜". Surfaced in the UI tooltip / accessibility label. */
   search_query?: string;
+  /**
+   * Optional LLM-generated, one-line local-flavor reason for picking this
+   * stop — e.g. "西关街坊吃了 30 年的小档，没有网红包装". Only set when:
+   *   1. ZHIPU_API_KEY is configured
+   *   2. The candidate came from the real (Amap) candidate pool
+   *   3. The LLM curator picked this exact poi_id from the whitelist
+   * Absent when LLM is disabled, falls back to the planner's default reason.
+   */
+  local_reason?: string;
 }
 
 export interface SuitabilityTags {

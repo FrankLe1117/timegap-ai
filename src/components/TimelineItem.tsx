@@ -117,6 +117,24 @@ export default function TimelineItem({ item, isLast }: { item: TimelineItemType;
           {item.reason && (
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{item.reason}</p>
           )}
+          {item.local_reason && (
+            <div
+              className="mt-1.5 flex items-start gap-1.5 rounded-md border border-violet-200/70 bg-violet-50/80 px-2 py-1 text-[11px] leading-snug text-violet-700 dark:border-violet-400/30 dark:bg-violet-500/10 dark:text-violet-200"
+              data-export-ignore="true"
+              title="AI 从高德返回的真实候选里挑的，并给出本地化理由"
+            >
+              <span className="shrink-0 text-violet-500 dark:text-violet-300" aria-hidden="true">
+                {/* sparkle icon */}
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 1.5l1.4 3.6 3.6 1.4-3.6 1.4L8 11.5 6.6 7.9 3 6.5l3.6-1.4L8 1.5zM3 11l.7 1.8L5.5 13.5l-1.8.7L3 16l-.7-1.8L.5 13.5l1.8-.7L3 11z" />
+                </svg>
+              </span>
+              <span>
+                <span className="font-medium">AI 本地推荐·</span>
+                {item.local_reason}
+              </span>
+            </div>
+          )}
           {hasNavablePlace(item) && (
             <button
               data-export-ignore="true"
