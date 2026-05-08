@@ -17,11 +17,12 @@ const SITE_URL = "https://laststop.app";
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Last Stop \u5c3e\u7a0b \u00b7 \u79bb\u57ce\u524d\u7684\u6700\u540e\u51e0\u5c0f\u65f6\uff0c\u5b89\u6392\u5f97\u521a\u521a\u597d",
-    template: "%s \u00b7 Last Stop \u5c3e\u7a0b",
+    default: "Last Stop 尾程 · 赶在起飞之前，再多玩一会",
+    template: "%s · Last Stop 尾程",
   },
   description:
-    "\u9000\u623f\u540e\u5230\u51fa\u53d1\u524d\uff0c\u628a\u9910\u5385\u3001\u666f\u70b9\u3001\u4ea4\u901a\u548c\u5b89\u5168\u7f13\u51b2\u653e\u5728\u540c\u4e00\u5f20\u65f6\u95f4\u8868\u91cc\u3002AI \u7406\u89e3\u4f60\u7684\u4e2d\u6587\u63cf\u8ff0\uff0c\u9ad8\u5fb7\u8def\u7ebf\u9a8c\u8bc1\u8d76\u8f66\u5b89\u5168\u8fb9\u754c\u3002",
+    "距离火车 / 飞机出发只剩几小时？把退房、餐厅、景点和路上时间放进同一张倒推时间表。AI 理解你的中文描述，高德路线验证赶车安全边界，绝不让你迟到。",
+
   keywords: [
     "\u5c3e\u7a0b\u89c4\u5212",
     "\u51fa\u5dee\u6700\u540e\u4e00\u5929",
@@ -33,18 +34,18 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "Last Stop" }],
   openGraph: {
-    title: "Last Stop \u5c3e\u7a0b \u00b7 \u79bb\u57ce\u524d\u7684\u6700\u540e\u51e0\u5c0f\u65f6",
+    title: "Last Stop 尾程 · 赶在起飞之前，再多玩一会",
     description:
-      "AI \u89e3\u6790\u4e2d\u6587\u63cf\u8ff0\uff0c\u9ad8\u5fb7\u8def\u7ebf\u9a8c\u8bc1\u8d76\u8f66\u5b89\u5168\u8fb9\u754c\uff0c\u4e09\u79cd\u8def\u7ebf\u4e00\u952e\u5bf9\u6bd4\u3002",
+      "距离火车 / 飞机出发只剩几小时？AI 帮你把退房、餐厅、景点、路上时间全塞进一张倒推时间表，三方案对比，高德路线验证不迟到。",
     url: SITE_URL,
-    siteName: "Last Stop \u5c3e\u7a0b",
+    siteName: "Last Stop 尾程",
     locale: "zh_CN",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Last Stop \u5c3e\u7a0b",
-    description: "\u79bb\u57ce\u524d\u7684\u6700\u540e\u51e0\u5c0f\u65f6\uff0c\u5b89\u6392\u5f97\u521a\u521a\u597d\u3002",
+    title: "Last Stop 尾程",
+    description: "赶在起飞之前，再多玩一会 — 火车 / 飞机倒推规划，AI + 高德实时路况。",
   },
   robots: { index: true, follow: true },
   formatDetection: { telephone: false, email: false, address: false },

@@ -3,7 +3,7 @@
 import OpenGraphImage from "./opengraph-image";
 
 export const runtime = "edge";
-export const alt = "Last Stop 尾程 — 把最后几个小时活成一段记忆";
+export const alt = "Last Stop 尾程 — 赶在起飞之前，再多玩一会";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 

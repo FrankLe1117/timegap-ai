@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 
 export const runtime = "edge";
-export const alt = "Last Stop 尾程 — 把最后几个小时活成一段记忆";
+export const alt = "Last Stop 尾程 — 赶在起飞之前，再多玩一会";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -87,7 +87,7 @@ export default async function OpenGraphImage() {
               flexWrap: "wrap",
             }}
           >
-            把最后几个小时
+            赶在起飞之前
           </div>
           <div
             style={{
@@ -101,7 +101,7 @@ export default async function OpenGraphImage() {
               display: "flex",
             }}
           >
-            活成一段记忆
+            再多玩一会
           </div>
         </div>
 
@@ -116,7 +116,7 @@ export default async function OpenGraphImage() {
             display: "flex",
           }}
         >
-          离开一座城市前，AI 帮你在赶车不迟到的前提下，安排一段刚刚好的本地体验
+距离火车 / 飞机出发只剩几小时？AI 把退房、餐厅、景点、路上时间塞进一张倒推时间表
         </div>
 
         {/* Footer row: feature chips + URL */}
@@ -131,9 +131,9 @@ export default async function OpenGraphImage() {
         >
           <div style={{ display: "flex", gap: 14 }}>
             {[
-              { label: "三方案对比", color: "#60a5fa" },
-              { label: "高德实时路况", color: "#34d399" },
-              { label: "晚高峰自动加权", color: "#fbbf24" },
+              { label: "火车 / 飞机倒推", color: "#60a5fa" },
+              { label: "高德路线验证不迟到", color: "#34d399" },
+              { label: "三方案对比选一个", color: "#fbbf24" },
             ].map((chip) => (
               <div
                 key={chip.label}

@@ -102,7 +102,7 @@ export default function ChatPanel({ onPlan, loading, messages, clarification }: 
           </div>
           <div>
             <h1 className="text-base font-semibold text-slate-900 dark:text-slate-100">Last Stop 尾程</h1>
-            <p className="text-[11px] text-slate-400 dark:text-slate-500">离城前的最后几小时，安排得刚刚好。</p>
+            <p className="text-[11px] text-slate-400 dark:text-slate-500">赶在起飞之前，再多玩一会。</p>
           </div>
         </div>
       </div>

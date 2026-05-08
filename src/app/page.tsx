@@ -231,7 +231,7 @@ export default function Home() {
             <div className="min-w-0">
               <div className="flex items-baseline gap-2">
                 <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">Last Stop 尾程</span>
-                <span className="hidden sm:inline text-[11px] text-slate-400 dark:text-slate-500 truncate">离城前的最后几小时，安排得刚刚好</span>
+                <span className="hidden sm:inline text-[11px] text-slate-400 dark:text-slate-500 truncate">赶在起飞之前，再多玩一会</span>
               </div>
               {headerKpis && (
                 <div className="flex items-center gap-3 mt-0.5">
